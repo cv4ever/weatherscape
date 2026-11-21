@@ -87,6 +87,7 @@ class SettingsActivity : ComponentActivity() {
                     onSetWallpaper = ::openWallpaperPicker,
                     onRefresh = { refresher.refresh() },
                     onPreview = ::preview,
+                    onLensPreview = ::previewLens,
                 )
             }
         }
@@ -119,12 +120,23 @@ class SettingsActivity : ComponentActivity() {
 
     /** Queues the moment and goes home, where the wallpaper plays it as soon as it is visible. */
     private fun preview(kind: MomentKind) {
+        if (!goHomeToPreview()) return
+        SettingsStore.requestPreview(this, kind)
+    }
+
+    /** Wets the glass for a short shower so the lens settings can be judged on the home screen. */
+    private fun previewLens() {
+        if (!goHomeToPreview()) return
+        SettingsStore.requestLensPreview(this)
+    }
+
+    private fun goHomeToPreview(): Boolean {
         if (!wallpaperActive.value) {
             Toast.makeText(this, "Set Pine Valley as your wallpaper first.", Toast.LENGTH_SHORT).show()
-            return
+            return false
         }
-        SettingsStore.requestPreview(this, kind)
         startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        return true
     }
 }
 
@@ -142,7 +154,9 @@ private fun WeatherscapeTheme(content: @Composable () -> Unit) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun SettingsScreen(active: Boolean, onSetWallpaper: () -> Unit, onRefresh: () -> Unit, onPreview: (MomentKind) -> Unit) {
+private fun SettingsScreen(
+    active: Boolean, onSetWallpaper: () -> Unit, onRefresh: () -> Unit, onPreview: (MomentKind) -> Unit, onLensPreview: () -> Unit,
+) {
     val context = LocalContext.current
     val prefs = remember { SettingsStore.prefs(context) }
     var s by remember { mutableStateOf(SettingsStore.read(context)) }
@@ -254,6 +268,34 @@ private fun SettingsScreen(active: Boolean, onSetWallpaper: () -> Unit, onRefres
                 }
                 SwitchRow("Raindrops on the lens", "Drops gather on the glass while it rains, slide down, and dry afterwards.", s.lensDrops) {
                     update(s.copy(lensDrops = it))
+                }
+                if (s.lensDrops) {
+                    Label("Amount of drops: ${String.format(java.util.Locale.US, "%.2f", s.lensAmount).trimEnd('0').trimEnd('.')}×")
+                    Slider(
+                        value = s.lensAmount,
+                        onValueChange = { s = s.copy(lensAmount = (it * 4).roundToInt() / 4f) },
+                        onValueChangeFinished = { update(s) },
+                        valueRange = .25f..2.5f,
+                        steps = 8,
+                    )
+                    Hint("Scales how much rain reaches the glass. Heavier rain still brings more drops than a drizzle.")
+                    Label("Drop size")
+                    Segmented(
+                        listOf(DropSize.SMALL to "Small", DropSize.MEDIUM to "Medium", DropSize.LARGE to "Large"),
+                        s.lensSize,
+                    ) { update(s.copy(lensSize = it)) }
+                    Label("Sliding")
+                    Segmented(
+                        listOf(SlideSpeed.SLOW to "Slow", SlideSpeed.NORMAL to "Normal", SlideSpeed.FAST to "Fast"),
+                        s.lensSpeed,
+                    ) { update(s.copy(lensSpeed = it)) }
+                    Label("After the rain")
+                    Segmented(
+                        listOf(Drying.QUICK to "Dry quickly", Drying.NORMAL to "Normal", Drying.LINGER to "Linger"),
+                        s.lensDrying,
+                    ) { update(s.copy(lensDrying = it)) }
+                    OutlinedButton(onClick = onLensPreview, modifier = Modifier.padding(top = 12.dp)) { Text("Try a 25-second shower") }
+                    Hint("Wets the glass on your home screen, then lets it dry. The valley keeps its real weather.")
                 }
 
                 Section("Wildlife and sky moments")

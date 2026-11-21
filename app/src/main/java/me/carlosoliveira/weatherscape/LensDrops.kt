@@ -40,10 +40,19 @@ class LensDrops {
     /**
      * Advances by [dt] seconds. A null [dt] means the wallpaper is redrawing rarely (reduced motion or
      * Battery Saver): the glass then holds a still set of drops while it rains and clears when dry.
+     * [amount] scales how much rain reaches the glass, [size] the drops, [speed] how fast they slide
+     * and [drying] how fast the glass dries; 1 matches the HTML preview.
      */
-    fun update(dt: Float?, rain: Float, wind: Float, width: Float, height: Float) {
+    fun update(
+        dt: Float?, rain: Float, wind: Float, width: Float, height: Float,
+        amount: Float = 1f, size: Float = 1f, speed: Float = 1f, drying: Float = 1f,
+    ) {
         w = width
         h = height
+        this.amount = amount
+        this.size = size
+        this.speed = speed
+        this.drying = drying
         if (dt == null) {
             if (rain < .02f) clear() else if (isEmpty) seed(rain)
         } else {
@@ -54,22 +63,26 @@ class LensDrops {
 
     private var w = 1f
     private var h = 1f
+    private var amount = 1f
+    private var size = 1f
+    private var speed = 1f
+    private var drying = 1f
 
     private fun seed(rain: Float) {
-        val area = w * h / 1.78f
-        repeat((260 * rain * area).toInt()) { addBead(Random.nextFloat() * w, Random.nextFloat() * h, .003f + .007f * sq(Random.nextFloat())) }
-        repeat((16 * rain * area).toInt()) { addDrop(Random.nextFloat() * h, .011f + .014f * Random.nextFloat()) }
+        val area = w * h / 1.78f * amount
+        repeat((260 * rain * area).toInt()) { addBead(Random.nextFloat() * w, Random.nextFloat() * h, size * (.003f + .007f * sq(Random.nextFloat()))) }
+        repeat(min(MAX_DROPS, (16 * rain * area).toInt())) { addDrop(Random.nextFloat() * h, size * (.011f + .014f * Random.nextFloat())) }
     }
 
     private fun step(dt: Float, rain: Float, wind: Float) {
         // Spawn rates are tuned for the preview's 9:16 wall; larger glass catches more rain.
-        val area = w * h / 1.78f
+        val area = w * h / 1.78f * amount
         if (rain > .01f) {
             var n = 50 * rain * area * dt + Random.nextFloat()
-            while (n >= 1) { addBead(Random.nextFloat() * w, Random.nextFloat() * h, .0028f + .0075f * sq(Random.nextFloat())); n-- }
+            while (n >= 1) { addBead(Random.nextFloat() * w, Random.nextFloat() * h, size * (.0028f + .0075f * sq(Random.nextFloat()))); n-- }
             n = (2.2f * rain + 5 * rain * rain) * area * dt + Random.nextFloat()
             while (n >= 1 && drops < MAX_DROPS) {
-                val d = addDrop(Random.nextFloat() * h, .011f + .022f * sq(Random.nextFloat()))
+                val d = addDrop(Random.nextFloat() * h, size * (.011f + .022f * sq(Random.nextFloat())))
                 // A new drop swallows the beads it lands on.
                 var i = beads - 1
                 while (i >= 0) {
@@ -80,11 +93,11 @@ class LensDrops {
             }
         } else {
             // After the shower the glass dries: beads first, then the drops.
-            for (i in 0 until beads) br[i] -= .001f * dt
-            for (i in 0 until drops) dr[i] -= .0022f * dt
+            for (i in 0 until beads) br[i] -= .001f * size * drying * dt
+            for (i in 0 until drops) dr[i] -= .0022f * size * drying * dt
         }
         var i = beads - 1
-        while (i >= 0) { if (br[i] < .0018f) removeBead(i); i-- }
+        while (i >= 0) { if (br[i] < .0018f * size) removeBead(i); i-- }
 
         var d = drops - 1
         while (d >= 0) {
@@ -95,20 +108,21 @@ class LensDrops {
     }
 
     private fun slide(d: Int, dt: Float, rain: Float, wind: Float) {
-        if (dr[d] < .0035f || dy[d] - dr[d] > h) { removeDrop(d); return }
-        if (rain > .01f && vy[d] == 0f) dr[d] += .0024f * rain * dt * Random.nextFloat()
-        if (dr[d] < SLIDE) { vy[d] = 0f; return }
+        if (dr[d] < .0035f * size || dy[d] - dr[d] > h) { removeDrop(d); return }
+        if (rain > .01f && vy[d] == 0f) dr[d] += .0024f * size * rain * dt * Random.nextFloat()
+        val slide = SLIDE * size
+        if (dr[d] < slide) { vy[d] = 0f; return }
         if (stall[d] > 0) { stall[d] -= dt; vy[d] *= .8f; return }
         // Stick and slip: water catches on the glass, then lets go.
-        val target = .05f + .38f * min(2f, (dr[d] - SLIDE) / SLIDE)
+        val target = (.05f + .38f * min(2f, (dr[d] - slide) / slide)) * speed
         vy[d] += (target - vy[d]) * min(1f, dt * 6)
         if (Random.nextFloat() < dt * 1.4f) { stall[d] = .05f + .35f * Random.nextFloat(); wander[d] = (Random.nextFloat() - .5f) * .3f }
         val step = vy[d] * dt
         dy[d] += step
         dx[d] += step * (wander[d] + .05f * wind)
         travelled[d] += step
-        while (travelled[d] > TRAIL) {
-            travelled[d] -= TRAIL
+        while (travelled[d] > TRAIL * size) {
+            travelled[d] -= TRAIL * size
             if (Random.nextFloat() < .75f && beads < MAX_BEADS) {
                 val r = dr[d] * (.18f + .2f * Random.nextFloat())
                 addBead(dx[d] + (Random.nextFloat() - .5f) * dr[d] * .4f, dy[d] - dr[d] * 1.25f, r)
@@ -204,9 +218,9 @@ class LensDrops {
 
     companion object {
         const val STRIDE = 4
-        // Room for the unfolded inner display, about twice the cover screen's glass.
-        private const val MAX_BEADS = 1300
-        private const val MAX_DROPS = 80
+        // Room for the heaviest amount on the unfolded inner display, about twice the cover screen's glass.
+        private const val MAX_BEADS = 3000
+        private const val MAX_DROPS = 160
         private const val SLIDE = .028f
         private const val TRAIL = .026f
     }

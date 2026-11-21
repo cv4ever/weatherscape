@@ -12,6 +12,7 @@ import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
+import kotlin.math.max
 
 /**
  * Draws Pine Valley: one full-screen pass for the landscape, then rain and moments as overlays.
@@ -31,6 +32,11 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
     private val lens = LensDrops()
     private val lensBuffer = floatBuffer(lens.vertices)
     private var lensTime = 0.0
+    /** Until this time the glass gets a preview shower, whatever the weather. */
+    private var lensShowerUntil = -1.0
+
+    /** Called on the GL thread when the settings screen asks to try the lens drops. */
+    fun previewLens(time: Double) { lensShowerUntil = time + LENS_SHOWER_SECONDS }
 
     private var landscape = 0
     private var effects = 0
@@ -116,7 +122,12 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
         val step = if (dt > 1.0 || s.reducedMotion) null else dt.toFloat()
         val metrics = context.resources.displayMetrics
         val unitsWide = metrics.widthPixels / metrics.density / PREVIEW_WIDTH_DP
-        lens.update(step, frame.air[3], frame.air[0], unitsWide, unitsWide * height / width)
+        // The preview shower ignores the weather, then lets the glass dry as it would after rain.
+        val rain = if (time < lensShowerUntil) max(frame.air[3], .85f) else frame.air[3]
+        lens.update(
+            step, rain, frame.air[0], unitsWide, unitsWide * height / width,
+            amount = s.lensAmount, size = s.lensSize.scale, speed = s.lensSpeed.scale, drying = s.lensDrying.scale,
+        )
         if (lens.vertexCount == 0) return
         glBindTexture(GL_TEXTURE_2D, frameCopy)
         glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, width, height)
@@ -296,6 +307,7 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
         const val ASPECT = 2048f / 1152f
         /** Width of the HTML preview's wall, the unit lens drops are sized in. */
         private const val PREVIEW_WIDTH_DP = 380f
+        private const val LENS_SHOWER_SECONDS = 25.0
 
         private fun floatBuffer(values: FloatArray): FloatBuffer =
             ByteBuffer.allocateDirect(values.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().apply {

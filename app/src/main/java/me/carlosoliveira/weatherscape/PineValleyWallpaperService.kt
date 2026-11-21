@@ -40,6 +40,7 @@ class PineValleyWallpaperService : WallpaperService() {
         private var settings = Settings()
         private var visible = false
         private var lastFrameNanos = 0L
+        private var handledLensPreviewAt = System.currentTimeMillis()
         private var handledPreviewAt = System.currentTimeMillis()
         private var handledRefreshAt = System.currentTimeMillis()
         private var nightColors: Boolean? = null
@@ -100,6 +101,7 @@ class PineValleyWallpaperService : WallpaperService() {
                 val now = SystemClock.elapsedRealtimeNanos() / 1e9
                 view.queueEvent { director.onShown(now) }
                 checkPreview()
+                checkLensPreview()
                 refresher.refreshIfStale()
                 lastFrameNanos = 0
                 view.requestRender()
@@ -150,6 +152,7 @@ class PineValleyWallpaperService : WallpaperService() {
             applySettings()
             when (key) {
                 SettingsStore.PREVIEW_REQUESTED_AT -> if (visible) checkPreview()
+                SettingsStore.LENS_PREVIEW_AT -> if (visible) checkLensPreview()
                 SettingsStore.REFRESH_REQUESTED_AT -> {
                     val at = prefs.getLong(key, 0)
                     if (at > handledRefreshAt) { handledRefreshAt = at; refresher.refresh() }
@@ -177,6 +180,15 @@ class PineValleyWallpaperService : WallpaperService() {
                 ?.let { name -> MomentKind.entries.firstOrNull { it.name == name } } ?: return
             val now = SystemClock.elapsedRealtimeNanos() / 1e9
             view?.queueEvent { director.preview(kind, now) }
+        }
+
+        /** Starts a preview shower on the glass the settings screen asked for, if the request is still recent. */
+        private fun checkLensPreview() {
+            val at = prefs.getLong(SettingsStore.LENS_PREVIEW_AT, 0)
+            if (at <= handledLensPreviewAt || System.currentTimeMillis() - at > 5 * 60_000) return
+            handledLensPreviewAt = at
+            val now = SystemClock.elapsedRealtimeNanos() / 1e9
+            view?.queueEvent { renderer.previewLens(now) }
         }
 
         /** Renders below native resolution and lets the compositor scale up; the plate is softer than the panel anyway. */
