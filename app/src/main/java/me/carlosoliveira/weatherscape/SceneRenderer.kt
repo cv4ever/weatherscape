@@ -33,8 +33,10 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
     private var effects = 0
     private var plate = 0
     private var stars = 0
-    private var birdAtlas = 0
-    private var squirrelAtlas = 0
+    private var moonTexture = 0
+    private var fogTexture = 0
+    private var auroraTexture = 0
+    private val atlases = java.util.EnumMap<Atlas, Int>(Atlas::class.java)
     private var grain = 0
     private val landscapeUniforms = HashMap<String, Int>()
     private val effectUniforms = HashMap<String, Int>()
@@ -45,8 +47,10 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         landscape = program("landscape")
         effects = program("overlay")
-        for (name in listOf("cropOffset", "cropScale", "landscape", "stars", "grain", "phase", "flow", "gust", "flash", "sunbeam",
-            "rainbow", "dim", "air", "ground", "sky", "horizonColor", "mist", "light")) {
+        for (name in listOf("cropOffset", "cropScale", "landscape", "stars", "grain", "moonTexture", "fogTexture",
+            "auroraTexture", "phase", "flow", "gust", "flash", "sunbeam", "rainbow", "dim", "air", "ground", "sky",
+            "horizonColor", "mist", "light", "moon", "moonLight", "moonGlow", "aurora", "snowCover", "reveal", "fogRoll",
+            "season")) {
             landscapeUniforms[name] = glGetUniformLocation(landscape, name)
         }
         for (name in listOf("cropOffset", "cropScale", "plateAspect", "atlas", "dim")) {
@@ -54,8 +58,11 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
         }
         plate = texture("textures/pine_valley.webp")
         stars = texture("textures/milky_way.webp")
-        birdAtlas = texture("textures/bird_atlas.webp")
-        squirrelAtlas = texture("textures/squirrel_atlas.webp")
+        for (atlas in Atlas.entries) atlases[atlas] = texture(atlas.path)
+        moonTexture = texture("textures/moon.webp")
+        // The fog bank and aurora tile sideways as they drift.
+        fogTexture = texture("textures/fog_bank.webp", GL_MIRRORED_REPEAT)
+        auroraTexture = texture("textures/aurora.webp", GL_MIRRORED_REPEAT)
         grain = grainTexture()
         glDisable(GL_DEPTH_TEST)
         glClearColor(0f, 0f, 0f, 1f)
@@ -98,6 +105,9 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
         glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, plate); glUniform1i(u.getValue("landscape"), 0)
         glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D, grain); glUniform1i(u.getValue("grain"), 2)
         glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, stars); glUniform1i(u.getValue("stars"), 1)
+        glActiveTexture(GL_TEXTURE3); glBindTexture(GL_TEXTURE_2D, moonTexture); glUniform1i(u.getValue("moonTexture"), 3)
+        glActiveTexture(GL_TEXTURE4); glBindTexture(GL_TEXTURE_2D, fogTexture); glUniform1i(u.getValue("fogTexture"), 4)
+        glActiveTexture(GL_TEXTURE5); glBindTexture(GL_TEXTURE_2D, auroraTexture); glUniform1i(u.getValue("auroraTexture"), 5)
         glUniform1f(u.getValue("phase"), frame.phase)
         glUniform1f(u.getValue("flow"), frame.flow)
         glUniform1f(u.getValue("gust"), frame.gust)
@@ -111,6 +121,14 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
         glUniform3fv(u.getValue("horizonColor"), 1, frame.horizon, 0)
         glUniform3fv(u.getValue("mist"), 1, frame.mist, 0)
         glUniform3fv(u.getValue("light"), 1, frame.light, 0)
+        glUniform4fv(u.getValue("moon"), 1, frame.moon, 0)
+        glUniform3fv(u.getValue("moonLight"), 1, frame.moonLight, 0)
+        glUniform1f(u.getValue("moonGlow"), frame.moonGlow)
+        glUniform1f(u.getValue("aurora"), frame.aurora)
+        glUniform1f(u.getValue("snowCover"), frame.snowCover)
+        glUniform1f(u.getValue("reveal"), frame.reveal)
+        glUniform2f(u.getValue("fogRoll"), frame.fogRoll[0], frame.fogRoll[1])
+        glUniform4fv(u.getValue("season"), 1, frame.season, 0)
         val corner = glGetAttribLocation(landscape, "corner")
         quad.position(0)
         glEnableVertexAttribArray(corner)
@@ -120,7 +138,7 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
     }
 
     private fun drawOverlays() {
-        if (painter.effects.vertices + painter.birds.vertices + painter.squirrels.vertices == 0) return
+        if (painter.effects.vertices == 0 && Atlas.ALL.all { painter.sprites.getValue(it).vertices == 0 }) return
         glEnable(GL_BLEND)
         // Overlay colours are premultiplied, as are the atlas bitmaps Android decodes.
         glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)
@@ -132,9 +150,14 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
         glUniform1f(u.getValue("dim"), dim)
         glUniform1i(u.getValue("atlas"), 0)
         glActiveTexture(GL_TEXTURE0)
-        draw(painter.effects, birdAtlas)
-        draw(painter.birds, birdAtlas)
-        draw(painter.squirrels, squirrelAtlas)
+        draw(painter.effects, grain)
+        for (atlas in Atlas.ALL) draw(painter.sprites.getValue(atlas), atlases.getValue(atlas))
+    }
+
+    /** Maps a touch on the screen to plate coordinates, using the crop of the last frame drawn. */
+    fun plateAt(screenX: Float, screenY: Float, out: FloatArray) {
+        out[0] = crop[0] + screenX / width * crop[2]
+        out[1] = crop[1] + screenY / height * crop[3]
     }
 
     private fun draw(batch: OverlayBatch, texture: Int) {
@@ -191,7 +214,7 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
         return ids[0]
     }
 
-    private fun texture(path: String): Int {
+    private fun texture(path: String, wrap: Int = GL_CLAMP_TO_EDGE): Int {
         val bitmap = context.assets.open(path).use { BitmapFactory.decodeStream(it) }
             ?: error("Cannot decode $path")
         val ids = IntArray(1)
@@ -199,7 +222,7 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
         glBindTexture(GL_TEXTURE_2D, ids[0])
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrap)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
         GLUtils.texImage2D(GL_TEXTURE_2D, 0, bitmap, 0)
         Log.d(TAG, "Loaded $path ${bitmap.width}x${bitmap.height}")

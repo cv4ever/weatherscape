@@ -5,7 +5,7 @@ import android.content.SharedPreferences
 import androidx.core.content.edit
 
 enum class Mode { LIVE, TIMELAPSE }
-enum class WeatherChoice { AUTO, SUNNY, WINDY, RAINY, STORM, FOGGY }
+enum class WeatherChoice { AUTO, SUNNY, WINDY, RAINY, STORM, FOGGY, SNOWY }
 enum class TimeChoice { AUTO, MORNING, AFTERNOON, SUNSET, NIGHT }
 enum class Frequency(val visibleChance: Float, val cooldownSeconds: Int) {
     RARE(.18f, 25 * 60), OCCASIONAL(.38f, 8 * 60), OFTEN(.75f, 90)
@@ -14,6 +14,8 @@ enum class Quality(val renderScale: Float) { BATTERY(.5f), BALANCED(.7f), SHARP(
 enum class MomentKind(val label: String) {
     BIRD("Passing bird"), FLOCK("Distant flock"), SQUIRREL("Red squirrel"), FIREFLIES("Fireflies"),
     COMET("Shooting star"), SUNBEAM("Sunbeam after rain"), RAINBOW("Rainbow"),
+    DEER("Roe deer"), BUZZARD("Buzzard"), GEESE("Geese"), FOG_ROLL("Fog rolling in"), MOONRISE("Moonrise"),
+    OWL("Owl"), BATS("Bats"), AURORA("Aurora"), CAR("Distant car"),
 }
 
 data class Settings(
@@ -36,6 +38,12 @@ data class Settings(
     val dimPercent: Int = 0,
     val pauseOnBatterySaver: Boolean = true,
     val parallax: Boolean = true,
+    /** Colder light in winter, fresher greens in spring, warmer late summers. */
+    val seasons: Boolean = true,
+    /** Mist thins and sometimes a bird leaves a treetop when the phone is unlocked. */
+    val unlockReveal: Boolean = true,
+    /** Tapping empty home screen flushes birds from the trees. */
+    val tapToWake: Boolean = true,
 )
 
 /** One SharedPreferences file shared by the settings screen and the wallpaper engine. */
@@ -72,6 +80,9 @@ object SettingsStore {
             dimPercent = p.getInt("dim_percent", d.dimPercent),
             pauseOnBatterySaver = p.getBoolean("pause_on_battery_saver", d.pauseOnBatterySaver),
             parallax = p.getBoolean("parallax", d.parallax),
+            seasons = p.getBoolean("seasons", d.seasons),
+            unlockReveal = p.getBoolean("unlock_reveal", d.unlockReveal),
+            tapToWake = p.getBoolean("tap_to_wake", d.tapToWake),
         )
     }
 
@@ -93,6 +104,9 @@ object SettingsStore {
         putInt("dim_percent", s.dimPercent)
         putBoolean("pause_on_battery_saver", s.pauseOnBatterySaver)
         putBoolean("parallax", s.parallax)
+        putBoolean("seasons", s.seasons)
+        putBoolean("unlock_reveal", s.unlockReveal)
+        putBoolean("tap_to_wake", s.tapToWake)
     }
 
     fun requestPreview(context: Context, kind: MomentKind) = prefs(context).edit {

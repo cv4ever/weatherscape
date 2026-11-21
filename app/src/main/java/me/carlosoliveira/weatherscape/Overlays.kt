@@ -1,6 +1,7 @@
 package me.carlosoliveira.weatherscape
 
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.hypot
@@ -64,8 +65,13 @@ class OverlayBatch(maxQuads: Int) {
     /**
      * Draws atlas cell [frame] (3 columns, 2 rows) anchored at x, y: the anchor sits at the
      * cell's horizontal centre and [foot] of its height. Then mirrors by [dir], rotates and clips.
+     * [brightness] and [saturation] let distant and night animals take the scene's light.
      */
-    fun sprite(frame: Int, x: Float, y: Float, width: Float, foot: Float, angle: Float, dir: Float, alpha: Float, clipLeft: Float = -10f) {
+    fun sprite(
+        frame: Int, x: Float, y: Float, width: Float, foot: Float, angle: Float, dir: Float, alpha: Float,
+        clipLeft: Float = -10f, brightness: Float = 1f, saturation: Float = 1f,
+    ) {
+        if (alpha <= .002f) return
         val height = width
         var left = -width * .5f
         val right = width * .5f
@@ -91,12 +97,25 @@ class OverlayBatch(maxQuads: Int) {
         val rtx = x + right * c - top * s; val rty = y + right * s + top * c
         val rbx = x + right * c - bottom * s; val rby = y + right * s + bottom * c
         val lbx = x + left * c - bottom * s; val lby = y + left * s + bottom * c
-        vertex(ltx, lty, 1f, 1f, 1f, alpha, uLeft, v0, 2f)
-        vertex(rtx, rty, 1f, 1f, 1f, alpha, uRight, v0, 2f)
-        vertex(rbx, rby, 1f, 1f, 1f, alpha, uRight, v1, 2f)
-        vertex(ltx, lty, 1f, 1f, 1f, alpha, uLeft, v0, 2f)
-        vertex(rbx, rby, 1f, 1f, 1f, alpha, uRight, v1, 2f)
-        vertex(lbx, lby, 1f, 1f, 1f, alpha, uLeft, v1, 2f)
+        val b = brightness
+        val shape = 2f + saturation.coerceIn(0f, 1f)
+        vertex(ltx, lty, b, b, b, alpha, uLeft, v0, shape)
+        vertex(rtx, rty, b, b, b, alpha, uRight, v0, shape)
+        vertex(rbx, rby, b, b, b, alpha, uRight, v1, shape)
+        vertex(ltx, lty, b, b, b, alpha, uLeft, v0, shape)
+        vertex(rbx, rby, b, b, b, alpha, uRight, v1, shape)
+        vertex(lbx, lby, b, b, b, alpha, uLeft, v1, shape)
+    }
+
+    /** Cross-fades two neighbouring frames so six poses read as continuous motion. */
+    fun blended(
+        frame: Float, x: Float, y: Float, width: Float, foot: Float, angle: Float, dir: Float, alpha: Float,
+        brightness: Float = 1f, saturation: Float = 1f,
+    ) {
+        val a = floor(frame).toInt().mod(6)
+        val f = frame - floor(frame)
+        sprite(a, x, y, width, foot, angle, dir, alpha * (1 - f * .55f), brightness = brightness, saturation = saturation)
+        sprite((a + 1) % 6, x, y, width, foot, angle, dir, alpha * f, brightness = brightness, saturation = saturation)
     }
 
     companion object {
@@ -110,14 +129,29 @@ data class Rgb(val r: Float, val g: Float, val b: Float) {
     }
 }
 
+/** One texture per animal; each gets its own batch so a frame needs one draw call per atlas. */
+enum class Atlas(val path: String) {
+    BIRD("textures/bird_atlas.webp"), SQUIRREL("textures/squirrel_atlas.webp"), DEER("textures/deer_atlas.webp"),
+    BUZZARD("textures/buzzard_atlas.webp"), GOOSE("textures/goose_atlas.webp"), OWL("textures/owl_atlas.webp"),
+    BAT("textures/bat_atlas.webp");
+
+    companion object {
+        /** Array form so per-frame loops don't allocate iterators. */
+        val ALL: Array<Atlas> = entries.toTypedArray()
+    }
+}
+
 /**
- * Builds rain and moment geometry for one frame, ported from the HTML preview. Units: the plate is
+ * Builds rain, snow and moment geometry for one frame, ported from the HTML preview. Units: the plate is
  * 1 wide and [aspect] tall, y pointing down, so the preview's `w` is 1 and `h` is [aspect].
  */
 class OverlayPainter(private val aspect: Float) {
-    val effects = OverlayBatch(1400)
-    val birds = OverlayBatch(16)
-    val squirrels = OverlayBatch(2)
+    val effects = OverlayBatch(1600)
+    val sprites = java.util.EnumMap<Atlas, OverlayBatch>(Atlas::class.java).apply {
+        for (atlas in Atlas.entries) put(atlas, OverlayBatch(24))
+    }
+    private val birds get() = sprites.getValue(Atlas.BIRD)
+    private val squirrels get() = sprites.getValue(Atlas.SQUIRREL)
 
     private class Drop(val x: Float, val y: Float, val depth: Float, val glint: Float, val chance: Float)
 
@@ -134,8 +168,10 @@ class OverlayPainter(private val aspect: Float) {
     }
 
     fun paint(f: Frame) {
-        effects.clear(); birds.clear(); squirrels.clear()
+        effects.clear()
+        for (atlas in Atlas.ALL) sprites.getValue(atlas).clear()
         rain(f)
+        snow(f)
         val t = f.momentProgress
         val dir = if (f.momentFlip) -1f else 1f
         when (f.moment) {
@@ -144,7 +180,40 @@ class OverlayPainter(private val aspect: Float) {
             MomentKind.SQUIRREL -> squirrel(t, f)
             MomentKind.FIREFLIES -> fireflies(t)
             MomentKind.COMET -> comet(t)
-            else -> Unit // Sunbeam and rainbow are drawn by the landscape shader.
+            MomentKind.DEER -> deer(t, f)
+            MomentKind.BUZZARD -> buzzard(t, f)
+            MomentKind.GEESE -> geese(t, f)
+            MomentKind.OWL -> owl(t, dir)
+            MomentKind.BATS -> bats(t)
+            MomentKind.CAR -> car(t)
+            else -> Unit // Sunbeam, rainbow, fog, moonrise and aurora are drawn by the landscape shader.
+        }
+        if (f.flushProgress >= 0f) flush(f)
+    }
+
+    /** 0 at night, 1 in full daylight, from the scene's ground light. */
+    private fun daylight(f: Frame) = ((f.ground[1] - .56f) / .57f).coerceIn(0f, 1f)
+
+    private fun snow(f: Frame) {
+        val strength = f.snow
+        if (strength <= .001f) return
+        val h = aspect
+        val px = 1f / 380
+        for (i in drops.indices) {
+            val d = drops[i]
+            val z = d.depth
+            val density = smooth(d.chance * .8f, d.chance * .8f + .15f, strength)
+            if (density <= .001f) continue
+            // Flakes fall slowly and swing side to side; nearer ones are larger and faster.
+            val fall = 1.6f + floor(z * 2.5f + d.glint * 1.5f)
+            val flight = d.y + fall * f.phase * .5f
+            val age = wrap(flight)
+            val sway = .02f * sin(TAU * (f.phase * (1.3f + d.glint) + d.x * 7)) + f.rainSway * .12f * (.4f + z)
+            val x = wrap(d.x + floor(flight) * .618034f + sway) * 1.1f - .05f
+            val y = (age * 1.1f - .05f) * h
+            val radius = px * (1.1f + 3.4f * z)
+            val alpha = (.25f + .55f * z) * density * mix(1f, .75f, f.light[0])
+            effects.glow(x, y, radius, SNOW, alpha)
         }
     }
 
@@ -234,6 +303,176 @@ class OverlayPainter(private val aspect: Float) {
         squirrels.sprite(frame, x, y, w * .079f, .875f, -.045f, if (departing) -1f else 1f, .94f, clipLeft = w * (.055f + wind))
     }
 
+    private fun deer(t: Float, f: Frame) {
+        // A roe deer steps out of the trees onto the meadow far below, grazes, looks up, and walks back.
+        var x = .488f
+        var dir = 1f
+        val frame = when {
+            t < .32f -> { val k = t / .32f; x = .446f + .042f * k; floor(wrap(k * 5) * 3).toInt() }
+            t < .58f -> 3
+            t < .70f -> 4
+            else -> { val k = (t - .7f) / .3f; x = .488f - .042f * k; dir = -1f; floor(wrap(k * 4) * 3).toInt() }
+        }
+        val alpha = smooth(0f, .1f, t) * (1 - smooth(.88f, 1f, t)) * .95f
+        sprites.getValue(Atlas.DEER).sprite(
+            frame, x, .6985f * aspect, .021f, .917f, 0f, dir, alpha,
+            brightness = .42f + .36f * daylight(f), saturation = .6f,
+        )
+    }
+
+    private fun buzzardPath(t: Float, out: FloatArray) {
+        // The thermal's centre slides in from off-screen, holds, then drifts out: the bird circles all the way.
+        val cx = mix(-.32f, .42f, smooth(0f, .32f, t)) + mix(0f, .92f, smooth(.68f, 1f, t))
+        val cy = .27f - .04f * t
+        val angle = t * TAU * 1.55f + .4f
+        out[0] = cx + .085f * cos(angle)
+        out[1] = cy + .024f * sin(angle)
+        out[2] = 1 + .12f * sin(angle)
+    }
+
+    private val now = FloatArray(3)
+    private val ahead = FloatArray(3)
+    private val behind = FloatArray(3)
+
+    private fun buzzard(t: Float, f: Frame) {
+        buzzardPath(t, now); buzzardPath(minOf(1f, t + .004f), ahead); buzzardPath(maxOf(0f, t - .004f), behind)
+        val vx = ahead[0] - behind[0]
+        val vy = ahead[1] - behind[1]
+        val turn = (vx * (ahead[1] - 2 * now[1] + behind[1]) - vy * (ahead[0] - 2 * now[0] + behind[0])) /
+            (vx * vx + vy * vy + 1e-9f).pow(1.5f)
+        val bank = (turn * .004f).coerceIn(-1f, 1f)
+        val age = t * 22f
+        val flapping = t < .1f || t > .9f || (t > .47f && t < .52f)
+        val dir = if (vx >= 0) 1f else -1f
+        val b = .45f + .45f * daylight(f)
+        val batch = sprites.getValue(Atlas.BUZZARD)
+        val x = now[0]; val y = now[1] * aspect; val width = .05f * now[2]
+        if (flapping) {
+            val beat = .5f - .5f * cos(age * TAU * 2.2f)
+            batch.sprite(0, x, y, width, .5f, bank * .12f, dir, .88f * (1 - beat * .7f), brightness = b, saturation = .7f)
+            batch.sprite(5, x, y, width, .5f, bank * .12f, dir, .88f * beat, brightness = b, saturation = .7f)
+        } else {
+            val glide = if (abs(bank) < .3f) 0f else if (bank > 0) 1 + minOf(1f, (abs(bank) - .3f) / .5f) else 4f
+            batch.blended(glide, x, y, width, .5f, bank * .12f, dir, .88f, brightness = b, saturation = .7f)
+        }
+    }
+
+    private fun geese(t: Float, f: Frame) {
+        // A loose V high up, heading south-west, each bird on its own wingbeat.
+        val leadX = 1.12f - 1.36f * t
+        val leadY = .17f - .03f * t + .005f * sin(t * 5)
+        val b = .42f + .38f * daylight(f)
+        val batch = sprites.getValue(Atlas.GOOSE)
+        for (i in 0 until 9) {
+            val k = (i + 1) / 2
+            val side = if (i % 2 == 1) 1f else -1f
+            val x = leadX + k * .03f + .003f * sin(t * 7 + i)
+            val y = leadY + side * k * .011f + .002f * sin(t * 9 + i * 1.7f)
+            batch.blended(wrap(t * 9 * 2.8f + i * .37f) * 6, x, y * aspect, .021f, .5f, .04f, -1f, .82f, brightness = b, saturation = .6f)
+        }
+    }
+
+    private fun owl(t: Float, dir: Float) {
+        // Tawny owl: a quick downstroke, a slower recovery, the body lifting on each beat, then a long glide.
+        val age = t * 6.5f
+        val x = if (dir > 0) -.08f + 1.16f * t else 1.08f - 1.16f * t
+        val beat = wrap(age / .62f)
+        val gliding = wrap(age / 3.1f) > .52f
+        val pose = if (beat < .4f) 4 * beat / .4f else 4 + 2 * (beat - .4f) / .6f
+        val lift = if (gliding) 0f else .0035f * sin(beat * TAU)
+        val y = (.585f - .03f * sin(t * PI.toFloat()) - lift) * aspect
+        val batch = sprites.getValue(Atlas.OWL)
+        if (gliding) batch.sprite(2, x, y, .06f, .5f, dir * -.03f, dir, .92f, brightness = .2f, saturation = .35f)
+        else batch.blended(pose, x, y, .06f, .5f, dir * -.03f, dir, .92f, brightness = .2f, saturation = .35f)
+    }
+
+    private fun bats(t: Float) {
+        // Erratic hunting loops just above the canopy.
+        val fade = smooth(0f, .12f, t) * (1 - smooth(.86f, 1f, t))
+        val batch = sprites.getValue(Atlas.BAT)
+        for (i in 0 until 3) {
+            val s = i * 2.17f + .4f
+            val x = .47f + .3f * sin(t * 3.1f + s * 5) + .07f * sin(t * 11.3f + s * 3)
+            val y = .645f + .035f * sin(t * 4.3f + s * 2) + .014f * sin(t * 17f + s)
+            val dx = .93f * cos(t * 3.1f + s * 5) + .79f * cos(t * 11.3f + s * 3)
+            val frame = floor(wrap(t * 10 * 9 + s) * 6).toInt()
+            batch.sprite(frame, x, y * aspect, .017f, .5f, 0f, if (dx > 0) 1f else -1f, fade * .9f, brightness = .17f, saturation = .3f)
+        }
+    }
+
+    /** The valley road: a long straight, a small bend that dips towards the viewer, then another straight. */
+    private fun roadY(x: Float): Float {
+        val bend = smooth(.42f, .52f, x)
+        return .742f - .006f * bend + .0045f * sin(PI.toFloat() * ((x - .42f) / .1f).coerceIn(0f, 1f))
+    }
+
+    /** Driving: cruise, brake into the bend, round it slowly, accelerate out. Time is the integral of 1/speed. */
+    private val roadX = FloatArray(401)
+    private val roadT = FloatArray(401).also { ts ->
+        var time = 0f
+        for (i in 0..400) {
+            val x = .1f + .72f * i / 400
+            val speed = mix(1f, .32f, smooth(.3f, .42f, x)) + mix(0f, .68f, smooth(.52f, .66f, x))
+            if (i > 0) time += .72f / 400 / speed
+            roadX[i] = x
+            ts[i] = time
+        }
+        for (i in ts.indices) ts[i] /= time
+    }
+
+    private fun car(t: Float) {
+        var lo = 0
+        var hi = roadT.size - 1
+        while (hi - lo > 1) { val mid = (lo + hi) / 2; if (roadT[mid] < t) lo = mid else hi = mid }
+        val x = mix(roadX[lo], roadX[hi], ((t - roadT[lo]) / maxOf(1e-6f, roadT[hi] - roadT[lo])).coerceIn(0f, 1f))
+        val y = roadY(x)
+        val tx = .002f
+        val ty = (roadY(x + .002f) - roadY(x - .002f)) * .5f
+        val len = hypot(tx, ty)
+        // Headlights brighten as the bend turns the car towards the viewer; tail lights show as it turns away.
+        val toward = ty / len * 3
+        val side = abs(tx / len)
+        val gaps = .5f + .5f * sin(x * 57) * sin(x * 23 + 1.3f)
+        val seen = (.25f + .75f * smooth(.3f, .62f, gaps)) * smooth(0f, .06f, t) * (1 - smooth(.94f, 1f, t))
+        val front = smooth(-.2f, .6f, toward)
+        val spread = .0012f + .0026f * (1 - side * .8f)
+        val py = y * aspect
+        effects.glow(x + .016f * tx / len, py + .016f * ty / len * aspect, .03f, HEADLIGHT_SPILL, .08f * seen * (.3f + front))
+        for (o in intArrayOf(-1, 1)) effects.glow(x + o * spread, py, .0055f, HEADLIGHT, seen * (.35f + .65f * front))
+        effects.glow(x, py, .013f, HEADLIGHT_HALO, .2f * seen * (.4f + .6f * front))
+        val tail = smooth(.05f, -.6f, toward) * seen
+        for (o in intArrayOf(-1, 1)) effects.glow(x + o * spread, py, .0042f, TAIL_LIGHT, .7f * tail)
+    }
+
+    /** Birds burst from a treetop and scatter up and away, after an unlock or a tap. */
+    private fun flush(f: Frame) {
+        val t = f.flushProgress
+        // A stateless hash of the flush seed, so every frame of one flush draws the same birds.
+        var state = f.flushSeed
+        fun next(): Float {
+            state = state * 1664525 + 1013904223
+            return (state ushr 8) / 16777216f
+        }
+        val b = .38f + .5f * daylight(f)
+        val fade = 1 - smooth(.8f, 1f, t)
+        for (i in 0 until f.flushCount) {
+            val side = if (next() < .5f) 1f else -1f
+            val spread = .08f + .25f * next()
+            val climb = .12f + .18f * next()
+            val delay = .08f * next()
+            val rate = 9f + 3 * next()
+            val offset = next()
+            val k = ((t - delay) / (1 - delay)).coerceIn(0f, 1f)
+            if (k <= 0f) continue
+            // Accelerating away: slow lift-off from the crown, then a fast climb.
+            val ease = k * k * (1.6f - .6f * k)
+            val x = f.flushX + side * spread * ease
+            val y = (f.flushY - .01f - climb * ease + .03f * ease * ease) * aspect
+            val beat = wrap(k * rate + offset) * 6
+            birds.blended(beat, x, y, .022f + .012f * k, .5f, side * -.15f, side, .9f * fade * smooth(0f, .05f, k), brightness = b)
+        }
+    }
+
     private fun fireflies(t: Float) {
         val w = 1f
         val h = aspect
@@ -316,6 +555,11 @@ class OverlayPainter(private val aspect: Float) {
         private val WARM_RAIN = Rgb.hex(0xdecfbb)
         private val FIREFLY_HALO = Rgb.hex(0xe6e89c)
         private val FIREFLY_CORE = Rgb.hex(0xfff6bf)
+        private val SNOW = Rgb.hex(0xf4f7fb)
+        private val HEADLIGHT = Rgb.hex(0xfff4d6)
+        private val HEADLIGHT_HALO = Rgb.hex(0xffe2a8)
+        private val HEADLIGHT_SPILL = Rgb.hex(0xfff1c4)
+        private val TAIL_LIGHT = Rgb.hex(0xff3b2a)
         private val FORMATION = arrayOf(
             0f to 0f, .036f to -.014f, .049f to .011f, .081f to -.026f, .102f to .028f,
             .124f to -.035f, .153f to .039f, .171f to -.039f,

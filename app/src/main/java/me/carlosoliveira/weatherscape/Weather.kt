@@ -20,6 +20,10 @@ data class WeatherSample(
     val wind: Double,
     val gusts: Double,
     val visibility: Double,
+    /** Snowfall in cm per hour. */
+    val snowfall: Double = 0.0,
+    /** Lying snow in metres. */
+    val snowDepth: Double = 0.0,
 ) {
     val thunder get() = code in 95..99
     val snow get() = code in 71..77 || code in 85..86
@@ -78,6 +82,8 @@ class WeatherReport(val fetchedAt: Long, val current: WeatherSample, private val
                 wind = c.optDouble("wind_speed_10m", 0.0),
                 gusts = c.optDouble("wind_gusts_10m", 0.0),
                 visibility = c.optDouble("visibility", 20000.0),
+                snowfall = c.optDouble("snowfall", 0.0) * perHour,
+                snowDepth = c.optDouble("snow_depth", 0.0),
             )
             val h = root.getJSONObject("hourly")
             val times = h.getJSONArray("time")
@@ -93,6 +99,8 @@ class WeatherReport(val fetchedAt: Long, val current: WeatherSample, private val
                     wind = h.getJSONArray("wind_speed_10m").at(i, 0.0),
                     gusts = h.getJSONArray("wind_gusts_10m").at(i, 0.0),
                     visibility = h.getJSONArray("visibility").at(i, 20000.0),
+                    snowfall = h.optJSONArray("snowfall")?.at(i, 0.0) ?: 0.0,
+                    snowDepth = h.optJSONArray("snow_depth")?.at(i, 0.0) ?: 0.0,
                 )
             }
             return WeatherReport(fetchedAt, current, hourly)
@@ -102,8 +110,8 @@ class WeatherReport(val fetchedAt: Long, val current: WeatherSample, private val
 
 /** Open-Meteo needs no API key. */
 object OpenMeteo {
-    private const val FIELDS =
-        "temperature_2m,relative_humidity_2m,precipitation,weather_code,cloud_cover,wind_speed_10m,wind_gusts_10m,visibility"
+    private const val FIELDS = "temperature_2m,relative_humidity_2m,precipitation,weather_code,cloud_cover," +
+        "wind_speed_10m,wind_gusts_10m,visibility,snowfall,snow_depth"
 
     fun forecastJson(latitude: Double, longitude: Double): String = get(
         "https://api.open-meteo.com/v1/forecast?latitude=$latitude&longitude=$longitude" +
@@ -136,13 +144,24 @@ object OpenMeteo {
 }
 
 /** The scene's weather inputs: wind, valley mist, cloud cover, rainfall, plus lightning. */
-data class Atmosphere(val wind: Float, val mist: Float, val cover: Float, val rain: Float, val thunder: Boolean = false) {
+data class Atmosphere(
+    val wind: Float,
+    val mist: Float,
+    val cover: Float,
+    val rain: Float,
+    val thunder: Boolean = false,
+    /** Falling snow, 0..1. */
+    val snow: Float = 0f,
+    /** Lying snow on the trees and ground, 0..1. */
+    val snowCover: Float = 0f,
+) {
     companion object {
         val SUNNY = Atmosphere(.66f, .11f, .03f, 0f)
         val WINDY = Atmosphere(2.55f, .18f, .27f, 0f)
         val RAINY = Atmosphere(.92f, .67f, .79f, .48f)
         val STORM = Atmosphere(2.85f, .78f, 1f, 1f, thunder = true)
         val FOGGY = Atmosphere(1f, 1.13f, 0f, 0f)
+        val SNOWY = Atmosphere(.7f, .55f, .9f, 0f, snow = .7f, snowCover = .85f)
 
         private fun curve(x: Double, vararg points: Pair<Double, Double>): Float {
             if (x <= points.first().first) return points.first().second.toFloat()
@@ -159,10 +178,13 @@ data class Atmosphere(val wind: Float, val mist: Float, val cover: Float, val ra
             val windy = max(s.wind, s.gusts * .6)
             var wind = curve(windy, 0.0 to .45, 10.0 to .7, 20.0 to 1.1, 30.0 to 1.7, 45.0 to 2.5, 60.0 to 2.9)
             var cover = (s.cloudCover / 100).toFloat()
-            // Snow has no renderer yet, so it shows as low overcast instead of rain.
+            // Snow falls as flakes, not rain; lying snow comes from the measured depth.
             var rain = if (s.snow) 0f else curve(
                 s.precipitation, 0.0 to 0.0, .1 to .12, .5 to .3, 1.0 to .45, 2.5 to .65, 5.0 to .85, 8.0 to 1.0,
             )
+            var snow = curve(s.snowfall, 0.0 to 0.0, .1 to .25, .5 to .5, 1.0 to .75, 2.0 to 1.0)
+            if (s.snow) snow = max(snow, .3f)
+            val snowCover = smooth(0f, .05f, s.snowDepth.toFloat()) * .9f + if (snow > 0f) .25f else 0f
             when (s.code) {
                 3 -> cover = max(cover, .85f)
                 in 51..57 -> rain = max(rain, .15f)
@@ -175,7 +197,10 @@ data class Atmosphere(val wind: Float, val mist: Float, val cover: Float, val ra
             if (s.code == 45 || s.code == 48) mist = max(mist, 1.15f)
             // Rain leaves mist in the valley for a while after it stops.
             if (secondsSinceRain != null) mist += .6f * (1 - smooth(0f, 5400f, secondsSinceRain.toFloat()))
-            return Atmosphere(wind, mist.coerceAtMost(1.25f), cover.coerceIn(0f, 1f), rain, s.thunder)
+            return Atmosphere(
+                wind, mist.coerceAtMost(1.25f), cover.coerceIn(0f, 1f), rain, s.thunder,
+                snow = snow, snowCover = snowCover.coerceAtMost(1f),
+            )
         }
     }
 }

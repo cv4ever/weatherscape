@@ -1,6 +1,11 @@
 package me.carlosoliveira.weatherscape
 
 import android.app.WallpaperColors
+import android.app.WallpaperManager
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.graphics.Color
@@ -8,6 +13,7 @@ import android.graphics.Point
 import android.opengl.GLSurfaceView
 import android.os.Build
 import android.os.PowerManager
+import android.os.Bundle
 import android.os.SystemClock
 import android.service.wallpaper.WallpaperService
 import android.view.Choreographer
@@ -38,6 +44,15 @@ class PineValleyWallpaperService : WallpaperService() {
         private var handledRefreshAt = System.currentTimeMillis()
         private var nightColors: Boolean? = null
         private val power = getSystemService(PowerManager::class.java)
+        private val tapPoint = FloatArray(2)
+
+        /** USER_PRESENT arrives once the keyguard is dismissed: the reveal plays as the home screen appears. */
+        private val unlockReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                val now = SystemClock.elapsedRealtimeNanos() / 1e9
+                view?.queueEvent { director.onUnlock(now) }
+            }
+        }
 
         /** GLSurfaceView drawing into the wallpaper's surface instead of a window's. */
         private inner class SceneView : GLSurfaceView(this@PineValleyWallpaperService) {
@@ -57,10 +72,13 @@ class PineValleyWallpaperService : WallpaperService() {
                 renderMode = GLSurfaceView.RENDERMODE_WHEN_DIRTY
             }
             prefs.registerOnSharedPreferenceChangeListener(this)
+            // Preview engines (the picker) have no keyguard to dismiss.
+            if (!isPreview) registerReceiver(unlockReceiver, IntentFilter(Intent.ACTION_USER_PRESENT))
         }
 
         override fun onDestroy() {
             prefs.unregisterOnSharedPreferenceChangeListener(this)
+            if (!isPreview) unregisterReceiver(unlockReceiver)
             Choreographer.getInstance().removeFrameCallback(this)
             view?.destroy()
             refresher.close()
@@ -96,6 +114,23 @@ class PineValleyWallpaperService : WallpaperService() {
             renderer.pan = if (settings.parallax) xOffset else .5f
             if (!visible) return
             view?.requestRender()
+        }
+
+        /** The launcher reports taps on empty home-screen space; icons and widgets keep their own taps. */
+        override fun onCommand(action: String?, x: Int, y: Int, z: Int, extras: Bundle?, resultRequested: Boolean): Bundle? {
+            if (action == WallpaperManager.COMMAND_TAP && visible && settings.tapToWake) {
+                val now = SystemClock.elapsedRealtimeNanos() / 1e9
+                val surface = surfaceHolder.surfaceFrame
+                // The launcher reports display pixels; the surface may render at a lower scale.
+                val display = displayContext?.resources?.displayMetrics
+                val sx = if (display != null) x * surface.width().toFloat() / display.widthPixels else x.toFloat()
+                val sy = if (display != null) y * surface.height().toFloat() / display.heightPixels else y.toFloat()
+                view?.queueEvent {
+                    renderer.plateAt(sx, sy, tapPoint)
+                    director.onTap(now, tapPoint[0], tapPoint[1])
+                }
+            }
+            return super.onCommand(action, x, y, z, extras, resultRequested)
         }
 
         /** Paces rendering to the chosen frame rate; static modes redraw only every 30 seconds. */

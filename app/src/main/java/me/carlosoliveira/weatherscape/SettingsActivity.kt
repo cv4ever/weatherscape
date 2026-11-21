@@ -231,6 +231,7 @@ private fun SettingsScreen(active: Boolean, onSetWallpaper: () -> Unit, onRefres
                     listOf(
                         WeatherChoice.AUTO to "Real weather", WeatherChoice.SUNNY to "Sunny", WeatherChoice.WINDY to "Windy",
                         WeatherChoice.RAINY to "Rainy", WeatherChoice.STORM to "Storm", WeatherChoice.FOGGY to "Foggy",
+                        WeatherChoice.SNOWY to "Snowy",
                     ),
                     s.weather,
                 ) { update(s.copy(weather = it)) }
@@ -248,9 +249,12 @@ private fun SettingsScreen(active: Boolean, onSetWallpaper: () -> Unit, onRefres
                     if (s.mode == Mode.LIVE) "Weather changes blend in over a minute or two."
                     else "Loops a 48-second afternoon storm into a starry night. Ignores the real weather.",
                 )
+                SwitchRow("Seasons", "Colder light in winter, fresher greens in spring, warmer late summers.", s.seasons) {
+                    update(s.copy(seasons = it))
+                }
 
                 Section("Wildlife and sky moments")
-                SwitchRow("Show moments", "Birds, a squirrel, fireflies, shooting stars, sunbeams and rainbows, when the conditions fit.", s.moments) {
+                SwitchRow("Show moments", "Wildlife, fog, the moon, aurora and more, only when the weather and light fit.", s.moments) {
                     update(s.copy(moments = it))
                 }
                 if (s.moments) {
@@ -259,6 +263,12 @@ private fun SettingsScreen(active: Boolean, onSetWallpaper: () -> Unit, onRefres
                         listOf(Frequency.RARE to "Rarely", Frequency.OCCASIONAL to "Sometimes", Frequency.OFTEN to "Often"),
                         s.frequency,
                     ) { update(s.copy(frequency = it)) }
+                }
+                SwitchRow("Wake on unlock", "The mist thins as you unlock, and sometimes a bird leaves a treetop.", s.unlockReveal) {
+                    update(s.copy(unlockReveal = it))
+                }
+                SwitchRow("Tap to wake the valley", "Tapping empty home-screen space sends birds up from the nearest trees.", s.tapToWake) {
+                    update(s.copy(tapToWake = it))
                 }
                 Label("Preview one now")
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

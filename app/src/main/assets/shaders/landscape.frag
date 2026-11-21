@@ -1,7 +1,7 @@
 precision highp float;
 // Coordinates are plate UVs: x 0..1 left to right, y 0..1 top to bottom.
 varying vec2 uv;
-uniform sampler2D landscape, stars;
+uniform sampler2D landscape, stars, moonTexture, fogTexture, auroraTexture;
 // 256x256 random bytes, nearest filtering, repeating. Arithmetic hashes break on Adreno: the
 // compiler fuses each inlined call differently, so neighbouring noise cells disagree and seams appear.
 uniform sampler2D grain;
@@ -13,6 +13,14 @@ uniform vec4 air;
 uniform vec3 ground, sky, horizonColor, mist;
 // light: star visibility, golden-hour amount, side the sun is on (-1 morning, 1 afternoon).
 uniform vec3 light;
+// moon: centre x, y in plate UV, radius in plate widths, visibility. moonLight: direction sunlight hits it from.
+uniform vec4 moon;
+uniform vec3 moonLight;
+// moonGlow: how much moonlight silvers the mist. fogRoll: x advance 0..1, y strength.
+uniform float moonGlow, aurora, snowCover, reveal;
+uniform vec2 fogRoll;
+// season: land colour multiplier and saturation.
+uniform vec4 season;
 const float tau = 6.2831853;
 
 float hash(vec2 p) { return texture2D(grain, (mod(floor(p), 256.) + .5) / 256.).r; }
@@ -65,6 +73,17 @@ void main() {
   float flank = pow(litSide, 1.6) * exp(-groundHeight * groundHeight);
   scene += light.y * sun * flank * vec3(.075, .033, .014);
 
+  // Seasons tint the land only; the sky keeps its own light.
+  float landLuma = dot(scene, vec3(.2126, .7152, .0722));
+  scene = mix(vec3(landLuma), scene, season.w) * season.rgb;
+  if (snowCover > .001) {
+    // Snow settles on the brighter, upward-facing needles; distant ridges read as evenly white.
+    float settle = smoothstep(.10, .32, luma) * (.55 + .45 * noise(p * vec2(160., 280.)));
+    settle = mix(settle, .8, 1. - smoothstep(.58, .66, p.y));
+    vec3 snow = vec3(.86, .9, .96) * ground * mix(1., .7, cover);
+    scene = mix(scene, snow, snowCover * settle * .75);
+  }
+
   if (p.y < .568) {
     float skyMatte = smoothstep(.495, .61, luma);
     float horizon = smoothstep(.05, .56, p.y);
@@ -92,6 +111,49 @@ void main() {
       aerial += vec3(.65, .74, .90) * (dust * .53 + points * .29 + pinpricks) * light.x * clarity * (1. - .87 * horizon * horizon);
     }
     aerial *= mix(.96, 1.04, opening);
+    if (moon.w > .001) {
+      vec2 d = (p - moon.xy) * vec2(1., 1.7777778) / moon.z;
+      float r = length(d);
+      // Low moons pass through more air: dimmer, warmer, softer.
+      float low = smoothstep(.43, .6, moon.y);
+      vec3 airTint = mix(vec3(1., .98, .94), vec3(1., .8, .6), low);
+      if (r < 1.15) {
+        vec3 normal = vec3(d.x, -d.y, sqrt(max(0., 1. - r * r)));
+        float lit = smoothstep(-.15, .2, dot(normal, moonLight));
+        // A wide blur keeps only the broad maria: through air the moon is a glow with faint markings.
+        vec2 t = d * .5 + .5;
+        float surface = 0.;
+        for (int i = 0; i < 8; i++) {
+          float a = float(i) * .785398;
+          surface += dot(texture2D(moonTexture, t + vec2(cos(a), sin(a)) * .035).rgb, vec3(.33));
+        }
+        float markings = mix(.82, 1.08, smoothstep(.25, .7, surface / 8.));
+        float limb = .9 + .1 * normal.z;
+        vec3 disc = airTint * vec3(1., .99, .96) * (1.75 * lit * markings * limb + .03) * mix(1., .7, low);
+        float haze = .08 + .22 * vapor(p * vec2(7., 40.), .6, 8.3) * (.4 + cover);
+        float edge = 1. - smoothstep(.82, 1.12, r);
+        aerial = mix(aerial, mix(disc, aerial, haze), moon.w * edge);
+      }
+      // Bloom: a bright core spill, a soft corona and a faint wide aureole.
+      float outside = max(r - .9, 0.);
+      float halo = .55 * exp(-outside * 7.) + .22 * exp(-outside * 2.2) + .07 * exp(-outside * .6);
+      aerial += vec3(.78, .81, .88) * airTint * halo * moon.w * moonGlow * (1. - .5 * cover);
+    }
+    if (aurora > .001) {
+      // One faint curtain low in the north-east, slowly folding: a photo layer warped and windowed in width.
+      float v = (p.y - .2) / .32;
+      if (v > 0. && v < 1.) {
+        float warp = .012 * sin(v * 5. + flow * .9 + p.x * 2.5) + .025 * (noise(vec2(p.x * 1.5, flow * .2)) - .5);
+        vec2 a = vec2(p.x * .42 + .28 + flow * .012 + warp, v * 1.05 - .02 + .03 * sin(p.x * 2.6 + flow * .3));
+        vec3 curtains = texture2D(auroraTexture, a).rgb;
+        curtains = mix(vec3(dot(curtains, vec3(.3, .55, .15))), curtains, .7);
+        float window = exp(-pow((p.x - .66) / .2, 2.));
+        float shimmer = .78 + .22 * noise(vec2(p.x * 90. + flow * 2., v * 2.));
+        float surge = .6 + .4 * noise(vec2(p.x * 2.2 - flow * .5, 1.7));
+        float fade = smoothstep(0., .25, v) * (1. - smoothstep(.65, 1., v));
+        aerial += curtains * window * shimmer * surge * fade * aurora * .13 * (1. - smoothstep(.2, .6, cover));
+      }
+    }
     if (cover > 0.) {
       float sheet = vapor(p * vec2(2.9, 9. + 9. * (1. - cover)), 1.9 + air.x * 1.5, 6.7);
       float relief = smoothstep(.17, .86, sheet) * (.24 + .76 * (1. - horizon));
@@ -108,8 +170,28 @@ void main() {
     float terrain = smoothstep(.115, .265, luma) * (1. - smoothstep(.52, .65, luma));
     float motion = .77 + air.x * .24;
     float depth = .37 * bank(p, .572, .015, 2.7, 2.8 * motion) + .49 * bank(p, .63, .025, 6.1, 3.6 * motion) + .44 * bank(p, .706, .026, 9.4, 4.9 * motion);
-    float strength = min(.77, depth * terrain * air.y * mix(1., .69, opening));
-    scene = mix(scene, mist * mix(1., .76, cover), strength);
+    float strength = min(.77, depth * terrain * air.y * mix(1., .69, opening)) * (1. - .45 * reveal);
+    vec3 fogColor = mist * mix(1., .76, cover) + vec3(.05, .06, .08) * moonGlow;
+    scene = mix(scene, fogColor, strength);
+    if (fogRoll.y > .001) {
+      // A real fog bank, tiled along the valley, pours over the right-hand ridge and floods leftwards.
+      float front = mix(1.18, -.25, fogRoll.x);
+      float edgeNoise = .08 * (noise(vec2(p.y * 40., flow * .6)) - .5) + .05 * (noise(vec2(p.y * 90. + 5., flow)) - .5);
+      float behind = smoothstep(front - .03, front + .16, p.x + edgeNoise);
+      float top = .648 - .03 * smoothstep(.62, 1., p.x) + .008 * sin(p.x * 9. + flow * .4);
+      float v = (p.y - top) / .11;
+      if (v > 0. && v < 1.) {
+        vec4 bank1 = texture2D(fogTexture, vec2(p.x * 1.4 - flow * .06, v * .7 + .15));
+        vec4 bank2 = texture2D(fogTexture, vec2(p.x * 2.3 + .31 - flow * .1, v * .75 + .12));
+        float density = max(bank1.a, bank2.a * .8) * smoothstep(0., .35, v) * (1. - smoothstep(.6, 1., v));
+        // The bitmap is premultiplied; divide alpha back out to read the fog's own shading.
+        float shade = .5 * (bank1.r / max(bank1.a, .02) + bank2.r / max(bank2.a, .02));
+        float tone = mix(.88, 1.04, clamp(shade, 0., 1.));
+        // A thin veil that thickens only in its core, so the valley stays readable through it.
+        float roll = fogRoll.y * behind * density * density * (.35 + .65 * terrain) * .55;
+        scene = mix(scene, fogColor * tone, min(.42, roll));
+      }
+    }
   }
 
   if (flash > .001) {
