@@ -23,6 +23,9 @@ enum class DropSize(val scale: Float) { SMALL(.7f), MEDIUM(1f), LARGE(1.4f) }
 enum class SlideSpeed(val scale: Float) { SLOW(.55f), NORMAL(1f), FAST(1.7f) }
 enum class Drying(val scale: Float) { QUICK(2.2f), NORMAL(1f), LINGER(.35f) }
 
+/** Glass effects the settings screen can try on the home screen. */
+enum class LensPreview { SHOWER, MIST }
+
 data class Settings(
     val mode: Mode = Mode.LIVE,
     val useDeviceLocation: Boolean = true,
@@ -56,6 +59,12 @@ data class Settings(
     val lensSize: DropSize = DropSize.MEDIUM,
     val lensSpeed: SlideSpeed = SlideSpeed.NORMAL,
     val lensDrying: Drying = Drying.NORMAL,
+    /** Small impacts on the glass in heavy rain. */
+    val lensSplashes: Boolean = true,
+    /** Condensation at the edges of the glass on foggy mornings. */
+    val lensMist: Boolean = true,
+    /** Draws at 15 fps while nothing moves fast; slow drift looks the same. */
+    val calmSaver: Boolean = true,
 )
 
 /** One SharedPreferences file shared by the settings screen and the wallpaper engine. */
@@ -68,6 +77,7 @@ object SettingsStore {
     const val WEATHER_ERROR = "weather_error"
     const val REFRESH_REQUESTED_AT = "refresh_requested_at"
     const val LENS_PREVIEW_AT = "lens_preview_at"
+    const val LENS_PREVIEW_KIND = "lens_preview_kind"
 
     fun prefs(context: Context): SharedPreferences =
         context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
@@ -101,6 +111,9 @@ object SettingsStore {
             lensSize = p.enum("lens_size", d.lensSize),
             lensSpeed = p.enum("lens_speed", d.lensSpeed),
             lensDrying = p.enum("lens_drying", d.lensDrying),
+            lensSplashes = p.getBoolean("lens_splashes", d.lensSplashes),
+            lensMist = p.getBoolean("lens_mist", d.lensMist),
+            calmSaver = p.getBoolean("calm_saver", d.calmSaver),
         )
     }
 
@@ -130,6 +143,9 @@ object SettingsStore {
         putString("lens_size", s.lensSize.name)
         putString("lens_speed", s.lensSpeed.name)
         putString("lens_drying", s.lensDrying.name)
+        putBoolean("lens_splashes", s.lensSplashes)
+        putBoolean("lens_mist", s.lensMist)
+        putBoolean("calm_saver", s.calmSaver)
     }
 
     fun requestPreview(context: Context, kind: MomentKind) = prefs(context).edit {
@@ -137,8 +153,9 @@ object SettingsStore {
         putLong(PREVIEW_REQUESTED_AT, System.currentTimeMillis())
     }
 
-    /** Asks the wallpaper to wet the glass for a short shower, to try the lens settings. */
-    fun requestLensPreview(context: Context) = prefs(context).edit {
+    /** Asks the wallpaper to show a glass effect for a short while, to try the lens settings. */
+    fun requestLensPreview(context: Context, kind: LensPreview) = prefs(context).edit {
+        putString(LENS_PREVIEW_KIND, kind.name)
         putLong(LENS_PREVIEW_AT, System.currentTimeMillis())
     }
 

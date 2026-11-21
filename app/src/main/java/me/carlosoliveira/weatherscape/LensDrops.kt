@@ -28,14 +28,25 @@ class LensDrops {
     private val travelled = FloatArray(MAX_DROPS)
     private var drops = 0
 
-    /** Quads for the glass shader: 6 vertices each of screen x, y (0..1, y down) and local x, y (-1..1). */
-    val vertices = FloatArray((MAX_BEADS + MAX_DROPS) * 6 * STRIDE)
+    /** Heavy-rain impacts: a ring of water spreads out and leaves a bead where it hit. */
+    private val sx = FloatArray(MAX_SPLASHES)
+    private val sy = FloatArray(MAX_SPLASHES)
+    private val sr = FloatArray(MAX_SPLASHES)
+    private val sAge = FloatArray(MAX_SPLASHES)
+    private val sSeed = FloatArray(MAX_SPLASHES)
+    private var splashes = 0
+
+    /**
+     * Quads for the glass shader: 6 vertices each of screen x, y (0..1, y down), local x, y (-1..1),
+     * and a shape: kind (0 drop, 1 splash), splash age 0..1, and a seed for variety.
+     */
+    val vertices = FloatArray((MAX_BEADS + MAX_DROPS + MAX_SPLASHES) * 6 * STRIDE)
     var vertexCount = 0
         private set
 
-    val isEmpty get() = beads == 0 && drops == 0
+    val isEmpty get() = beads == 0 && drops == 0 && splashes == 0
 
-    fun clear() { beads = 0; drops = 0; vertexCount = 0 }
+    fun clear() { beads = 0; drops = 0; splashes = 0; vertexCount = 0 }
 
     /**
      * Advances by [dt] seconds. A null [dt] means the wallpaper is redrawing rarely (reduced motion or
@@ -45,7 +56,7 @@ class LensDrops {
      */
     fun update(
         dt: Float?, rain: Float, wind: Float, width: Float, height: Float,
-        amount: Float = 1f, size: Float = 1f, speed: Float = 1f, drying: Float = 1f,
+        amount: Float = 1f, size: Float = 1f, speed: Float = 1f, drying: Float = 1f, splashes: Boolean = true,
     ) {
         w = width
         h = height
@@ -53,6 +64,7 @@ class LensDrops {
         this.size = size
         this.speed = speed
         this.drying = drying
+        splashesOn = splashes
         if (dt == null) {
             if (rain < .02f) clear() else if (isEmpty) seed(rain)
         } else {
@@ -67,6 +79,7 @@ class LensDrops {
     private var size = 1f
     private var speed = 1f
     private var drying = 1f
+    private var splashesOn = true
 
     private fun seed(rain: Float) {
         val area = w * h / 1.78f * amount
@@ -91,12 +104,32 @@ class LensDrops {
                 }
                 n--
             }
+            // Heavy rain hits hard enough to splash before it settles.
+            if (splashesOn && rain > .45f) {
+                n = 14 * (rain - .45f) * area * dt + Random.nextFloat()
+                while (n >= 1 && splashes < MAX_SPLASHES) {
+                    val s = splashes++
+                    sx[s] = Random.nextFloat() * w; sy[s] = Random.nextFloat() * h
+                    sr[s] = size * (.014f + .014f * Random.nextFloat()); sAge[s] = 0f; sSeed[s] = Random.nextFloat()
+                    addBead(sx[s], sy[s], size * (.003f + .003f * Random.nextFloat()))
+                    n--
+                }
+            }
         } else {
             // After the shower the glass dries: beads first, then the drops.
             for (i in 0 until beads) br[i] -= .001f * size * drying * dt
             for (i in 0 until drops) dr[i] -= .0022f * size * drying * dt
         }
         var i = beads - 1
+        var k = splashes - 1
+        while (k >= 0) {
+            sAge[k] += dt / SPLASH_SECONDS
+            if (sAge[k] >= 1f) {
+                splashes--
+                sx[k] = sx[splashes]; sy[k] = sy[splashes]; sr[k] = sr[splashes]; sAge[k] = sAge[splashes]; sSeed[k] = sSeed[splashes]
+            }
+            k--
+        }
         while (i >= 0) { if (br[i] < .0018f * size) removeBead(i); i-- }
 
         var d = drops - 1
@@ -168,24 +201,26 @@ class LensDrops {
             val ry = dr[d] * stretch
             o = quad(o, dx[d], dy[d] - .15f * ry + .15f * dr[d], rx, ry)
         }
+        for (k in 0 until splashes) o = quad(o, sx[k], sy[k], sr[k], sr[k], 1f, sAge[k], sSeed[k])
         vertexCount = o / STRIDE
     }
 
-    private fun quad(start: Int, x: Float, y: Float, rx: Float, ry: Float): Int {
+    private fun quad(start: Int, x: Float, y: Float, rx: Float, ry: Float, kind: Float = 0f, age: Float = 0f, seed: Float = 0f): Int {
         val l = (x - rx) / w
         val r = (x + rx) / w
         val t = (y - ry) / h
         val b = (y + ry) / h
-        var o = vertex(start, l, t, -1f, -1f)
-        o = vertex(o, r, t, 1f, -1f)
-        o = vertex(o, r, b, 1f, 1f)
-        o = vertex(o, l, t, -1f, -1f)
-        o = vertex(o, r, b, 1f, 1f)
-        return vertex(o, l, b, -1f, 1f)
+        var o = vertex(start, l, t, -1f, -1f, kind, age, seed)
+        o = vertex(o, r, t, 1f, -1f, kind, age, seed)
+        o = vertex(o, r, b, 1f, 1f, kind, age, seed)
+        o = vertex(o, l, t, -1f, -1f, kind, age, seed)
+        o = vertex(o, r, b, 1f, 1f, kind, age, seed)
+        return vertex(o, l, b, -1f, 1f, kind, age, seed)
     }
 
-    private fun vertex(o: Int, px: Float, py: Float, lx: Float, ly: Float): Int {
+    private fun vertex(o: Int, px: Float, py: Float, lx: Float, ly: Float, kind: Float, age: Float, seed: Float): Int {
         vertices[o] = px; vertices[o + 1] = py; vertices[o + 2] = lx; vertices[o + 3] = ly
+        vertices[o + 4] = kind; vertices[o + 5] = age; vertices[o + 6] = seed
         return o + STRIDE
     }
 
@@ -217,10 +252,12 @@ class LensDrops {
     private fun sq(v: Float) = v * v
 
     companion object {
-        const val STRIDE = 4
+        const val STRIDE = 7
         // Room for the heaviest amount on the unfolded inner display, about twice the cover screen's glass.
         private const val MAX_BEADS = 3000
         private const val MAX_DROPS = 160
+        private const val MAX_SPLASHES = 60
+        private const val SPLASH_SECONDS = .35f
         private const val SLIDE = .028f
         private const val TRAIL = .026f
     }

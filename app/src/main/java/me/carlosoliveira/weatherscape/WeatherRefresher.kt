@@ -94,6 +94,7 @@ class WeatherRefresher(private val context: Context, private val onReport: (Weat
                     remove(SettingsStore.WEATHER_ERROR)
                 }
                 onReport(report)
+                ConditionsWidget.updateAll(context)
             } catch (e: Exception) {
                 Log.w("Weatherscape", "Weather refresh failed", e)
                 prefs.edit { putString(SettingsStore.WEATHER_ERROR, e.message ?: e.javaClass.simpleName) }

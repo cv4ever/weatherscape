@@ -124,10 +124,10 @@ class SettingsActivity : ComponentActivity() {
         SettingsStore.requestPreview(this, kind)
     }
 
-    /** Wets the glass for a short shower so the lens settings can be judged on the home screen. */
-    private fun previewLens() {
+    /** Shows a glass effect on the home screen so the lens settings can be judged there. */
+    private fun previewLens(kind: LensPreview) {
         if (!goHomeToPreview()) return
-        SettingsStore.requestLensPreview(this)
+        SettingsStore.requestLensPreview(this, kind)
     }
 
     private fun goHomeToPreview(): Boolean {
@@ -155,7 +155,7 @@ private fun WeatherscapeTheme(content: @Composable () -> Unit) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SettingsScreen(
-    active: Boolean, onSetWallpaper: () -> Unit, onRefresh: () -> Unit, onPreview: (MomentKind) -> Unit, onLensPreview: () -> Unit,
+    active: Boolean, onSetWallpaper: () -> Unit, onRefresh: () -> Unit, onPreview: (MomentKind) -> Unit, onLensPreview: (LensPreview) -> Unit,
 ) {
     val context = LocalContext.current
     val prefs = remember { SettingsStore.prefs(context) }
@@ -226,6 +226,13 @@ private fun SettingsScreen(
                         TextButton(onClick = onRefresh) { Text("Refresh") }
                     }
                 }
+                val widgets = remember { android.appwidget.AppWidgetManager.getInstance(context) }
+                val provider = remember { android.content.ComponentName(context, ConditionsWidget::class.java) }
+                if (widgets.isRequestPinAppWidgetSupported && widgets.getAppWidgetIds(provider).isEmpty()) {
+                    TextButton(onClick = { widgets.requestPinAppWidget(provider, null, null) }) {
+                        Text("Add the weather widget to your home screen")
+                    }
+                }
 
                 Section("Location")
                 SwitchRow("Use phone location", "Updates when you open this screen or the weather refreshes.", s.useDeviceLocation) { on ->
@@ -294,8 +301,19 @@ private fun SettingsScreen(
                         listOf(Drying.QUICK to "Dry quickly", Drying.NORMAL to "Normal", Drying.LINGER to "Linger"),
                         s.lensDrying,
                     ) { update(s.copy(lensDrying = it)) }
-                    OutlinedButton(onClick = onLensPreview, modifier = Modifier.padding(top = 12.dp)) { Text("Try a 25-second shower") }
+                    SwitchRow("Splashes in heavy rain", "Drops hit the glass hard and spread out before they settle.", s.lensSplashes) {
+                        update(s.copy(lensSplashes = it))
+                    }
+                    OutlinedButton(onClick = { onLensPreview(LensPreview.SHOWER) }, modifier = Modifier.padding(top = 12.dp)) {
+                        Text("Try a 25-second shower")
+                    }
                     Hint("Wets the glass on your home screen, then lets it dry. The valley keeps its real weather.")
+                }
+                SwitchRow("Mist on the lens", "On foggy mornings the edges of the glass fog up, then clear as the fog lifts.", s.lensMist) {
+                    update(s.copy(lensMist = it))
+                }
+                if (s.lensMist) {
+                    OutlinedButton(onClick = { onLensPreview(LensPreview.MIST) }) { Text("Try the mist") }
                 }
 
                 Section("Wildlife and sky moments")
@@ -351,6 +369,9 @@ private fun SettingsScreen(
                 }
                 SwitchRow("Reduce motion", "Keeps the scene still. It still follows the weather and the time of day.", s.reducedMotion) {
                     update(s.copy(reducedMotion = it))
+                }
+                SwitchRow("Save power when calm", "Drops to 15 fps while only fog and clouds drift. Rain, wind and moments still play smoothly.", s.calmSaver) {
+                    update(s.copy(calmSaver = it))
                 }
                 SwitchRow("Pause in Battery Saver", "Redraws twice a minute while Battery Saver is on.", s.pauseOnBatterySaver) {
                     update(s.copy(pauseOnBatterySaver = it))

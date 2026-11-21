@@ -135,11 +135,15 @@ class PineValleyWallpaperService : WallpaperService() {
             return super.onCommand(action, x, y, z, extras, resultRequested)
         }
 
-        /** Paces rendering to the chosen frame rate; static modes redraw only every 30 seconds. */
+        /**
+         * Paces rendering to the chosen frame rate; static modes redraw only every 30 seconds. When the
+         * valley only drifts, slow fog and clouds look the same at [CALM_FPS], so the calm saver uses it.
+         */
         override fun doFrame(frameTimeNanos: Long) {
             if (!visible) return
             val still = settings.reducedMotion || (settings.pauseOnBatterySaver && power?.isPowerSaveMode == true)
-            val interval = if (still) 30_000_000_000L else 1_000_000_000L / settings.frameRate.coerceIn(10, 60)
+            val rate = if (settings.calmSaver && !renderer.busy) minOf(settings.frameRate, CALM_FPS) else settings.frameRate
+            val interval = if (still) 30_000_000_000L else 1_000_000_000L / rate.coerceIn(10, 60)
             if (frameTimeNanos - lastFrameNanos >= interval - 2_000_000) {
                 lastFrameNanos = frameTimeNanos
                 view?.requestRender()
@@ -182,13 +186,15 @@ class PineValleyWallpaperService : WallpaperService() {
             view?.queueEvent { director.preview(kind, now) }
         }
 
-        /** Starts a preview shower on the glass the settings screen asked for, if the request is still recent. */
+        /** Starts a glass effect preview the settings screen asked for, if the request is still recent. */
         private fun checkLensPreview() {
             val at = prefs.getLong(SettingsStore.LENS_PREVIEW_AT, 0)
             if (at <= handledLensPreviewAt || System.currentTimeMillis() - at > 5 * 60_000) return
             handledLensPreviewAt = at
+            val kind = prefs.getString(SettingsStore.LENS_PREVIEW_KIND, null)
+                ?.let { name -> LensPreview.entries.firstOrNull { it.name == name } } ?: return
             val now = SystemClock.elapsedRealtimeNanos() / 1e9
-            view?.queueEvent { renderer.previewLens(now) }
+            view?.queueEvent { renderer.previewLens(kind, now) }
         }
 
         /** Renders below native resolution and lets the compositor scale up; the plate is softer than the panel anyway. */
@@ -227,5 +233,9 @@ class PineValleyWallpaperService : WallpaperService() {
                 WallpaperColors(primary, secondary, tertiary)
             }
         }
+    }
+
+    companion object {
+        private const val CALM_FPS = 15
     }
 }

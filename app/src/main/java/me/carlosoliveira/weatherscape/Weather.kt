@@ -28,6 +28,17 @@ data class WeatherSample(
     val thunder get() = code in 95..99
     val snow get() = code in 71..77 || code in 85..86
 
+    /** Broad kind of weather, coarse enough that a change between kinds is worth telling. */
+    val kind: Sky get() = when (code) {
+        0, 1, 2 -> Sky.CLEAR
+        3 -> Sky.CLOUDY
+        45, 48 -> Sky.FOG
+        in 71..77, 85, 86 -> Sky.SNOW
+        in 95..99 -> Sky.STORM
+        in 51..67, in 80..82 -> Sky.RAIN
+        else -> Sky.CLOUDY
+    }
+
     fun describe(): String {
         val words = when (code) {
             0 -> "Clear"
@@ -47,6 +58,8 @@ data class WeatherSample(
     }
 }
 
+enum class Sky { CLEAR, CLOUDY, FOG, RAIN, SNOW, STORM }
+
 data class Place(val name: String, val detail: String, val latitude: Double, val longitude: Double)
 
 class WeatherReport(val fetchedAt: Long, val current: WeatherSample, private val hourly: List<WeatherSample>) {
@@ -65,6 +78,20 @@ class WeatherReport(val fetchedAt: Long, val current: WeatherSample, private val
             .maxOfOrNull { it.epochSeconds }
             ?.let { (nowSeconds - it).coerceAtLeast(0) }
     }
+
+    /**
+     * The first forecast hour after [nowSeconds] whose kind of weather differs from now, as the new
+     * kind and the hour it starts, or null when it stays the same through the forecast.
+     */
+    fun nextChange(nowSeconds: Long): Pair<Sky, Long>? {
+        val now = current.kind
+        val next = hourly.filter { it.epochSeconds > nowSeconds }.sortedBy { it.epochSeconds }.firstOrNull { it.kind != now }
+        return next?.let { it.kind to it.epochSeconds }
+    }
+
+    /** Hours of forecast after [nowSeconds], for "no change in the next N hours". */
+    fun forecastHours(nowSeconds: Long): Int =
+        hourly.maxOfOrNull { it.epochSeconds }?.let { ((it - nowSeconds) / 3600).toInt().coerceAtLeast(0) } ?: 0
 
     companion object {
         fun parse(json: String, fetchedAt: Long): WeatherReport {

@@ -12,7 +12,9 @@ import java.nio.ByteOrder
 import java.nio.FloatBuffer
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
+import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
 
 /**
  * Draws Pine Valley: one full-screen pass for the landscape, then rain and moments as overlays.
@@ -24,6 +26,12 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
     /** Sun altitude of the last drawn frame, for the system's wallpaper colour hints. */
     @Volatile var lastSunAltitude = 0.0
         private set
+    /**
+     * Whether the last frame had fast motion: rain, snow, strong wind, lightning, a moment, birds
+     * leaving the trees, or water or mist changing on the glass. Otherwise the valley only drifts.
+     */
+    @Volatile var busy = true
+        private set
 
     private val frame = Frame()
     private val painter = OverlayPainter(ASPECT)
@@ -32,15 +40,25 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
     private val lens = LensDrops()
     private val lensBuffer = floatBuffer(lens.vertices)
     private var lensTime = 0.0
-    /** Until this time the glass gets a preview shower, whatever the weather. */
+    /** Until these times the glass gets a preview shower or preview condensation, whatever the weather. */
     private var lensShowerUntil = -1.0
+    private var lensMistUntil = -1.0
+    /** Condensation on the glass, 0..1, easing towards the weather's target. */
+    private var mistLevel = 0f
+    private var mistTarget = 0f
 
-    /** Called on the GL thread when the settings screen asks to try the lens drops. */
-    fun previewLens(time: Double) { lensShowerUntil = time + LENS_SHOWER_SECONDS }
+    /** Called on the GL thread when the settings screen asks to try the glass effects. */
+    fun previewLens(kind: LensPreview, time: Double) {
+        when (kind) {
+            LensPreview.SHOWER -> lensShowerUntil = time + LENS_SHOWER_SECONDS
+            LensPreview.MIST -> lensMistUntil = time + LENS_MIST_SECONDS
+        }
+    }
 
     private var landscape = 0
     private var effects = 0
     private var glass = 0
+    private var mist = 0
     /** Copy of the frame behind the lens drops, sized to the surface. */
     private var frameCopy = 0
     private var plate = 0
@@ -53,6 +71,7 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
     private val landscapeUniforms = HashMap<String, Int>()
     private val effectUniforms = HashMap<String, Int>()
     private val glassUniforms = HashMap<String, Int>()
+    private val mistUniforms = HashMap<String, Int>()
     private var width = 1
     private var height = 1
     private val crop = FloatArray(4)
@@ -62,6 +81,8 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
         effects = program("overlay")
         glass = program("glass")
         for (name in listOf("scene", "texel", "reach", "daylight")) glassUniforms[name] = glGetUniformLocation(glass, name)
+        mist = program("mist", vertex = "screen")
+        for (name in listOf("scene", "grain", "texel", "ratio", "amount", "flow")) mistUniforms[name] = glGetUniformLocation(mist, name)
         for (name in listOf("cropOffset", "cropScale", "landscape", "stars", "grain", "moonTexture", "fogTexture",
             "auroraTexture", "phase", "flow", "gust", "flash", "sunbeam", "rainbow", "dim", "air", "ground", "sky",
             "horizonColor", "mist", "light", "moon", "moonLight", "moonGlow", "aurora", "snowCover", "reveal", "fogRoll",
@@ -110,33 +131,78 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
         painter.paint(frame)
         drawOverlays()
         drawLens(time)
+        busy = frame.moment != null || frame.flushProgress >= 0f || frame.reveal > .01f || frame.flash > .001f ||
+            frame.air[3] > .01f || frame.snow > .01f || frame.air[0] > 1.3f || lens.vertexCount > 0 ||
+            abs(mistLevel - mistTarget) > .01f
     }
 
-    /** Raindrops on the camera glass: each refracts a copy of the frame drawn so far. */
+    /** Condensation and raindrops on the camera glass, both refracting a copy of the frame drawn so far. */
     private fun drawLens(time: Double) {
         val s = director.settings
         val dt = time - lensTime
         lensTime = time
-        if (!s.lensDrops) { lens.clear(); return }
-        // Rare redraws (reduced motion, Battery Saver) hold a still set of drops instead of simulating.
-        val step = if (dt > 1.0 || s.reducedMotion) null else dt.toFloat()
-        val metrics = context.resources.displayMetrics
-        val unitsWide = metrics.widthPixels / metrics.density / PREVIEW_WIDTH_DP
-        // The preview shower ignores the weather, then lets the glass dry as it would after rain.
-        val rain = if (time < lensShowerUntil) max(frame.air[3], .85f) else frame.air[3]
-        lens.update(
-            step, rain, frame.air[0], unitsWide, unitsWide * height / width,
-            amount = s.lensAmount, size = s.lensSize.scale, speed = s.lensSpeed.scale, drying = s.lensDrying.scale,
-        )
-        if (lens.vertexCount == 0) return
+        // Rare redraws (reduced motion, Battery Saver) hold a still glass instead of simulating.
+        val still = dt > 1.0 || s.reducedMotion
+        updateMist(if (still) null else dt.toFloat(), s)
+        if (s.lensDrops) {
+            val metrics = context.resources.displayMetrics
+            val unitsWide = metrics.widthPixels / metrics.density / PREVIEW_WIDTH_DP
+            // The preview shower ignores the weather, then lets the glass dry as it would after rain.
+            val rain = if (time < lensShowerUntil) max(frame.air[3], .85f) else frame.air[3]
+            lens.update(
+                if (still) null else dt.toFloat(), rain, frame.air[0], unitsWide, unitsWide * height / width,
+                amount = s.lensAmount, size = s.lensSize.scale, speed = s.lensSpeed.scale, drying = s.lensDrying.scale,
+                splashes = s.lensSplashes,
+            )
+        } else {
+            lens.clear()
+        }
+        if (lens.vertexCount == 0 && mistLevel < .004f) return
         glBindTexture(GL_TEXTURE_2D, frameCopy)
         glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, width, height)
         glEnable(GL_BLEND)
         glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)
-        glUseProgram(glass)
-        val u = glassUniforms
         glActiveTexture(GL_TEXTURE0)
         glBindTexture(GL_TEXTURE_2D, frameCopy)
+        if (mistLevel >= .004f) drawMist()
+        if (lens.vertexCount > 0) drawDrops()
+    }
+
+    /**
+     * Condensation follows dense valley fog, strongest in the cool of the morning or night, and
+     * clears slowly as the fog lifts. A null [dt] jumps straight to the target.
+     */
+    private fun updateMist(dt: Float?, s: Settings) {
+        val afternoon = frame.light[2] > 0f && frame.sunAltitude > 10
+        var target = if (s.lensMist) smooth(.8f, 1.15f, frame.air[1]) * (if (afternoon) .3f else 1f) else 0f
+        // The preview fogs the glass for a while, then lets it clear the way it would as fog lifts.
+        if (lensTime < lensMistUntil) target = 1f
+        val seconds = if (lensTime < lensMistUntil) MIST_PREVIEW_SECONDS else MIST_SECONDS
+        mistTarget = target
+        mistLevel = if (dt == null) target else mistLevel + (target - mistLevel) * min(1f, dt / seconds)
+    }
+
+    private fun drawMist() {
+        glUseProgram(mist)
+        val u = mistUniforms
+        glUniform1i(u.getValue("scene"), 0)
+        glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, grain); glUniform1i(u.getValue("grain"), 1)
+        glActiveTexture(GL_TEXTURE0)
+        glUniform2f(u.getValue("texel"), 1f / width, 1f / height)
+        glUniform1f(u.getValue("ratio"), height.toFloat() / width)
+        glUniform1f(u.getValue("amount"), mistLevel)
+        glUniform1f(u.getValue("flow"), frame.flow)
+        val corner = glGetAttribLocation(mist, "corner")
+        quad.position(0)
+        glEnableVertexAttribArray(corner)
+        glVertexAttribPointer(corner, 2, GL_FLOAT, false, 0, quad)
+        glDrawArrays(GL_TRIANGLE_STRIP, 0, 4)
+        glDisableVertexAttribArray(corner)
+    }
+
+    private fun drawDrops() {
+        glUseProgram(glass)
+        val u = glassUniforms
         glUniform1i(u.getValue("scene"), 0)
         glUniform2f(u.getValue("texel"), 1f / width, 1f / height)
         // Taller reach so drops in the sky still catch the dark ridges, upside down.
@@ -147,11 +213,13 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
         val stride = LensDrops.STRIDE * 4
         val position = glGetAttribLocation(glass, "position")
         val local = glGetAttribLocation(glass, "local")
+        val shape = glGetAttribLocation(glass, "shape")
         lensBuffer.position(0); glVertexAttribPointer(position, 2, GL_FLOAT, false, stride, lensBuffer)
         lensBuffer.position(2); glVertexAttribPointer(local, 2, GL_FLOAT, false, stride, lensBuffer)
-        glEnableVertexAttribArray(position); glEnableVertexAttribArray(local)
+        lensBuffer.position(4); glVertexAttribPointer(shape, 3, GL_FLOAT, false, stride, lensBuffer)
+        glEnableVertexAttribArray(position); glEnableVertexAttribArray(local); glEnableVertexAttribArray(shape)
         glDrawArrays(GL_TRIANGLES, 0, lens.vertexCount)
-        glDisableVertexAttribArray(position); glDisableVertexAttribArray(local)
+        glDisableVertexAttribArray(position); glDisableVertexAttribArray(local); glDisableVertexAttribArray(shape)
     }
 
     /** Cover-fits the 9:16 plate: crop the sides on tall screens, the sky and foreground on wide ones. */
@@ -248,7 +316,7 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
         glDisableVertexAttribArray(position); glDisableVertexAttribArray(color); glDisableVertexAttribArray(shape)
     }
 
-    private fun program(name: String): Int {
+    private fun program(name: String, vertex: String = name): Int {
         fun compile(type: Int, file: String): Int {
             val source = context.assets.open("shaders/$file").bufferedReader().use { it.readText() }
             val shader = glCreateShader(type)
@@ -260,7 +328,7 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
             return shader
         }
         val id = glCreateProgram()
-        glAttachShader(id, compile(GL_VERTEX_SHADER, "$name.vert"))
+        glAttachShader(id, compile(GL_VERTEX_SHADER, "$vertex.vert"))
         glAttachShader(id, compile(GL_FRAGMENT_SHADER, "$name.frag"))
         glLinkProgram(id)
         val ok = IntArray(1)
@@ -308,6 +376,11 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
         /** Width of the HTML preview's wall, the unit lens drops are sized in. */
         private const val PREVIEW_WIDTH_DP = 380f
         private const val LENS_SHOWER_SECONDS = 25.0
+        private const val LENS_MIST_SECONDS = 15.0
+        /** Time constant of condensation following the weather: it forms and clears over a minute or so. */
+        private const val MIST_SECONDS = 25f
+        /** The preview fogs the glass faster so it is ready to watch. */
+        private const val MIST_PREVIEW_SECONDS = 3f
 
         private fun floatBuffer(values: FloatArray): FloatBuffer =
             ByteBuffer.allocateDirect(values.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().apply {

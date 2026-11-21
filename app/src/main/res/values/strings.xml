@@ -4,4 +4,6 @@
     <string name="wallpaper_name">Pine Valley</string>
     <string name="author">Carlos Oliveira</string>
     <string name="wallpaper_description">A pine valley that follows your weather and the sun, with the occasional bird, squirrel or shooting star.</string>
+    <string name="widget_name">Pine Valley weather</string>
+    <string name="widget_description">The weather the wallpaper shows, and when it will change next.</string>
 </resources>
