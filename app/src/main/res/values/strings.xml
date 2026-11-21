@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Weatherscape</string>
+    <string name="wallpaper_name">Pine Valley</string>
+    <string name="author">Carlos Oliveira</string>
+    <string name="wallpaper_description">A pine valley that follows your weather and the sun, with the occasional bird, squirrel or shooting star.</string>
+</resources>

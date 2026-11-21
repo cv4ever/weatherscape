@@ -1,0 +1,112 @@
+package me.carlosoliveira.weatherscape
+
+import android.content.Context
+import android.content.SharedPreferences
+import androidx.core.content.edit
+
+enum class Mode { LIVE, TIMELAPSE }
+enum class WeatherChoice { AUTO, SUNNY, WINDY, RAINY, STORM, FOGGY }
+enum class TimeChoice { AUTO, MORNING, AFTERNOON, SUNSET, NIGHT }
+enum class Frequency(val visibleChance: Float, val cooldownSeconds: Int) {
+    RARE(.18f, 25 * 60), OCCASIONAL(.38f, 8 * 60), OFTEN(.75f, 90)
+}
+enum class Quality(val renderScale: Float) { BATTERY(.5f), BALANCED(.7f), SHARP(1f) }
+enum class MomentKind(val label: String) {
+    BIRD("Passing bird"), FLOCK("Distant flock"), SQUIRREL("Red squirrel"), FIREFLIES("Fireflies"),
+    COMET("Shooting star"), SUNBEAM("Sunbeam after rain"), RAINBOW("Rainbow"),
+}
+
+data class Settings(
+    val mode: Mode = Mode.LIVE,
+    val useDeviceLocation: Boolean = true,
+    val placeName: String = "Lisbon",
+    val latitude: Double = 38.7223,
+    val longitude: Double = -9.1393,
+    /** 0 shows current weather; otherwise the forecast this many hours ahead. */
+    val forecastHours: Int = 0,
+    val weather: WeatherChoice = WeatherChoice.AUTO,
+    val time: TimeChoice = TimeChoice.AUTO,
+    val moments: Boolean = true,
+    val frequency: Frequency = Frequency.OCCASIONAL,
+    val reducedMotion: Boolean = false,
+    val frameRate: Int = 30,
+    val quality: Quality = Quality.BALANCED,
+    val dimPercent: Int = 0,
+    val pauseOnBatterySaver: Boolean = true,
+    val parallax: Boolean = true,
+)
+
+/** One SharedPreferences file shared by the settings screen and the wallpaper engine. */
+object SettingsStore {
+    private const val FILE = "weatherscape"
+    const val PREVIEW_MOMENT = "preview_moment"
+    const val PREVIEW_REQUESTED_AT = "preview_requested_at"
+    const val WEATHER_JSON = "weather_json"
+    const val WEATHER_FETCHED_AT = "weather_fetched_at"
+    const val WEATHER_ERROR = "weather_error"
+    const val REFRESH_REQUESTED_AT = "refresh_requested_at"
+
+    fun prefs(context: Context): SharedPreferences =
+        context.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+
+    fun read(context: Context): Settings {
+        val p = prefs(context)
+        val d = Settings()
+        return Settings(
+            mode = p.enum("mode", d.mode),
+            useDeviceLocation = p.getBoolean("use_device_location", d.useDeviceLocation),
+            placeName = p.getString("place_name", d.placeName) ?: d.placeName,
+            latitude = p.getFloat("latitude", d.latitude.toFloat()).toDouble(),
+            longitude = p.getFloat("longitude", d.longitude.toFloat()).toDouble(),
+            forecastHours = p.getInt("forecast_hours", d.forecastHours),
+            weather = p.enum("weather", d.weather),
+            time = p.enum("time", d.time),
+            moments = p.getBoolean("moments", d.moments),
+            frequency = p.enum("frequency", d.frequency),
+            reducedMotion = p.getBoolean("reduced_motion", d.reducedMotion),
+            frameRate = p.getInt("frame_rate", d.frameRate),
+            quality = p.enum("quality", d.quality),
+            dimPercent = p.getInt("dim_percent", d.dimPercent),
+            pauseOnBatterySaver = p.getBoolean("pause_on_battery_saver", d.pauseOnBatterySaver),
+            parallax = p.getBoolean("parallax", d.parallax),
+        )
+    }
+
+    fun write(context: Context, s: Settings) = prefs(context).edit {
+        putString("mode", s.mode.name)
+        putBoolean("use_device_location", s.useDeviceLocation)
+        putString("place_name", s.placeName)
+        putFloat("latitude", s.latitude.toFloat())
+        putFloat("longitude", s.longitude.toFloat())
+        putInt("forecast_hours", s.forecastHours)
+        putString("weather", s.weather.name)
+        putString("time", s.time.name)
+        putBoolean("moments", s.moments)
+        putString("frequency", s.frequency.name)
+        putBoolean("reduced_motion", s.reducedMotion)
+        putInt("frame_rate", s.frameRate)
+        putString("quality", s.quality.name)
+        putInt("dim_percent", s.dimPercent)
+        putBoolean("pause_on_battery_saver", s.pauseOnBatterySaver)
+        putBoolean("parallax", s.parallax)
+    }
+
+    fun requestPreview(context: Context, kind: MomentKind) = prefs(context).edit {
+        putString(PREVIEW_MOMENT, kind.name)
+        putLong(PREVIEW_REQUESTED_AT, System.currentTimeMillis())
+    }
+
+    /** Only the place keys, so a background location update can't overwrite other settings. */
+    fun writePlace(context: Context, name: String, latitude: Double, longitude: Double) = prefs(context).edit {
+        putString("place_name", name)
+        putFloat("latitude", latitude.toFloat())
+        putFloat("longitude", longitude.toFloat())
+    }
+
+    fun requestRefresh(context: Context) = prefs(context).edit {
+        putLong(REFRESH_REQUESTED_AT, System.currentTimeMillis())
+    }
+
+    private inline fun <reified E : Enum<E>> SharedPreferences.enum(key: String, fallback: E): E =
+        getString(key, null)?.let { name -> enumValues<E>().firstOrNull { it.name == name } } ?: fallback
+}
