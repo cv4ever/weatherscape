@@ -433,18 +433,21 @@ class SceneDirector {
         val bright = smooth(-6f, 12f, altitude)
         val twilight = smooth(-18f, -5f, altitude)
         val gold = smooth(-10f, -1.3f, altitude) * (1 - smooth(1f, 13f, altitude))
-        out.ground[0] = mix(.45f, 1.15f, bright) + .22f * gold
-        out.ground[1] = mix(.56f, 1.13f, bright) + .07f * gold
-        out.ground[2] = mix(.76f, 1.035f, bright) - .10f * gold
-        out.sky[0] = mix(.052f, .405f, bright) + .153f * gold
-        out.sky[1] = mix(.086f, .648f, bright) + .066f * gold
-        out.sky[2] = mix(.17f, .865f, bright) + .18f * twilight * (1 - bright)
-        out.horizon[0] = mix(.21f, .72f, bright) + .40f * gold
-        out.horizon[1] = mix(.31f, .83f, bright) + .24f * gold
-        out.horizon[2] = mix(.48f, .91f, bright) - .10f * gold
-        out.mist[0] = mix(.33f, .71f, bright) + .32f * gold
-        out.mist[1] = mix(.42f, .82f, bright) + .10f * gold
-        out.mist[2] = mix(.58f, .88f, bright) - .06f * gold
+        // 0 in the blue hour, 1 once the sky is fully dark: near-black sky, the land a faint silhouette.
+        val deep = 1 - smooth(-16f, -8f, altitude)
+        out.ground[0] = mix(mix(.45f, .10f, deep), 1.15f, bright) + .22f * gold
+        out.ground[1] = mix(mix(.56f, .12f, deep), 1.13f, bright) + .07f * gold
+        out.ground[2] = mix(mix(.76f, .17f, deep), 1.035f, bright) - .10f * gold
+        out.sky[0] = mix(mix(.052f, .004f, deep), .405f, bright) + .153f * gold
+        out.sky[1] = mix(mix(.086f, .006f, deep), .648f, bright) + .066f * gold
+        out.sky[2] = mix(mix(.17f, .016f, deep), .865f, bright) + .18f * twilight * (1 - bright)
+        // A faint glow stays low over the ridges, so the treeline still reads against the sky.
+        out.horizon[0] = mix(mix(.21f, .03f, deep), .72f, bright) + .40f * gold
+        out.horizon[1] = mix(mix(.31f, .037f, deep), .83f, bright) + .24f * gold
+        out.horizon[2] = mix(mix(.48f, .06f, deep), .91f, bright) - .10f * gold
+        out.mist[0] = mix(mix(.33f, .065f, deep), .71f, bright) + .32f * gold
+        out.mist[1] = mix(mix(.42f, .075f, deep), .82f, bright) + .10f * gold
+        out.mist[2] = mix(mix(.58f, .10f, deep), .88f, bright) - .06f * gold
         out.light[0] = 1 - smooth(-17f, -6f, altitude)
         out.light[1] = gold
         out.light[2] = if (circular(minute - day.noon) >= 0) 1f else -1f

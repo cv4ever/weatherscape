@@ -72,6 +72,11 @@ void main() {
   float litSide = mix(1. - p.x, p.x, .5 + .5 * light.z);
   float flank = pow(litSide, 1.6) * exp(-groundHeight * groundHeight);
   scene += light.y * sun * flank * vec3(.075, .033, .014);
+  // Moonlight: a cool, faint light that lets the ridges and treetops read at night.
+  scene += base * vec3(.13, .16, .22) * moonGlow * light.x;
+  // At night the eye reads shapes, not colour: trees sink towards black while the paler valley
+  // floor and ridges keep a little light, so the silhouettes stay readable.
+  scene *= mix(1., .35 + 1.25 * smoothstep(.04, .5, luma), light.x * .8);
 
   // Seasons tint the land only; the sky keeps its own light.
   float landLuma = dot(scene, vec3(.2126, .7152, .0722));
@@ -99,7 +104,9 @@ void main() {
       float twinkle = .86 + .14 * sin(tau * (phase * (2. + floor(seed * 4.)) + seed));
       float dust = pow(max(0., starlight - .029), 1.14);
       float points = smoothstep(.34, .83, starlight) * twinkle;
-      float clarity = 1. - smoothstep(.22, .57, cover);
+      // By day a partial sky is a veil; at night the clouds break into patches with stars between,
+      // so only a near-overcast sky hides them everywhere.
+      float clarity = mix(1. - smoothstep(.22, .57, cover), 1. - smoothstep(.8, 1., cover), light.x);
       vec2 field = where * vec2(23., 41.);
       vec2 cell = floor(field);
       float id = hash(cell);
@@ -108,7 +115,9 @@ void main() {
       float core = exp(-dot(delta, delta) * mix(600., 255., id));
       float scintillation = .77 + .23 * sin(tau * (phase * (2. + floor(id * 5.)) + id));
       float pinpricks = step(.79, id) * core * scintillation * mix(.14, .39, id);
-      aerial += vec3(.65, .74, .90) * (dust * .53 + points * .29 + pinpricks) * light.x * clarity * (1. - .87 * horizon * horizon);
+      // Against a fully dark sky the eye adapts and far more stars show.
+      float adapted = 1. + .8 * (1. - smoothstep(.02, .12, dot(sky, vec3(.333))));
+      aerial += vec3(.65, .74, .90) * (dust * .53 + points * .29 + pinpricks) * adapted * light.x * clarity * (1. - .87 * horizon * horizon);
     }
     aerial *= mix(.96, 1.04, opening);
     if (moon.w > .001) {
@@ -158,10 +167,16 @@ void main() {
       float sheet = vapor(p * vec2(2.9, 9. + 9. * (1. - cover)), 1.9 + air.x * 1.5, 6.7);
       float relief = smoothstep(.17, .86, sheet) * (.24 + .76 * (1. - horizon));
       vec3 ceiling = mix(vec3(.28, .34, .40), mist, .48 + .35 * horizon);
-      // Cloud undersides only catch as much light as the sky has: dim at dusk, near black at night.
+      // Cloud undersides only catch as much light as the sky has: dim at dusk, near black at night,
+      // lifted a little when the moon is up.
       float skyLight = smoothstep(.09, .55, dot(sky, vec3(.333)));
-      ceiling *= mix(1.05, .67, air.w) * mix(.3, 1., skyLight);
-      aerial = mix(aerial, ceiling * (.79 + .32 * relief), cover * mix(.65, .98, relief));
+      ceiling *= mix(1.05, .67, air.w) * mix(.12, 1., skyLight);
+      ceiling += vec3(.11, .12, .15) * moonGlow * (.5 + .5 * relief);
+      float veil = cover * mix(.65, .98, relief);
+      // At night: separate patches whose share of the sky follows the cloud cover.
+      float edge = .8 - .6 * cover;
+      float patches = smoothstep(edge - .16, edge + .16, sheet) * min(1., cover * 2.5);
+      aerial = mix(aerial, ceiling * (.79 + .32 * relief), mix(veil, max(patches, veil * smoothstep(.85, 1., cover)), light.x));
     }
     scene = mix(scene, aerial, skyMatte);
   }

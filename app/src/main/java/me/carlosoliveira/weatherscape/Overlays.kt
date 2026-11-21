@@ -5,6 +5,7 @@ import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.hypot
+import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.sin
 
@@ -194,6 +195,13 @@ class OverlayPainter(private val aspect: Float) {
     /** 0 at night, 1 in full daylight, from the scene's ground light. */
     private fun daylight(f: Frame) = ((f.ground[1] - .56f) / .57f).coerceIn(0f, 1f)
 
+    /**
+     * 1 from the blue hour through the day, falling to [floor] once the sky is fully dark; the moon
+     * gives some back. Keeps rain, snow and animals from glowing against a black night.
+     */
+    private fun nightLight(f: Frame, floor: Float) =
+        min(1f, mix(floor, 1f, smooth(.12f, .45f, f.ground[1])) + .3f * f.moonGlow)
+
     private fun snow(f: Frame) {
         val strength = f.snow
         if (strength <= .001f) return
@@ -212,7 +220,7 @@ class OverlayPainter(private val aspect: Float) {
             val x = wrap(d.x + floor(flight) * .618034f + sway) * 1.1f - .05f
             val y = (age * 1.1f - .05f) * h
             val radius = px * (1.1f + 3.4f * z)
-            val alpha = (.25f + .55f * z) * density * mix(1f, .75f, f.light[0])
+            val alpha = (.25f + .55f * z) * density * mix(1f, .75f, f.light[0]) * nightLight(f, .4f)
             effects.glow(x, y, radius, SNOW, alpha)
         }
     }
@@ -239,7 +247,7 @@ class OverlayPainter(private val aspect: Float) {
             val length = px * (3 + z * mix(17f, 24f, storm) + d.glint * 5)
             val density = smooth(d.chance * .76f, d.chance * .76f + .18f, strength)
             val opacity = (.029f + z * .136f + d.glint * .044f) * mix(1f, 1.22f, storm) * mix(1f, .8f, f.light[0]) *
-                density * smooth(0f, .32f, strength)
+                nightLight(f, .45f) * density * smooth(0f, .32f, strength)
             if (opacity < .001f) continue
             val tip = rate * length
             if (x + tip < -.01f || x > w + .01f || y < -.01f || y - length > h) continue
@@ -316,7 +324,7 @@ class OverlayPainter(private val aspect: Float) {
         val alpha = smooth(0f, .1f, t) * (1 - smooth(.88f, 1f, t)) * .95f
         sprites.getValue(Atlas.DEER).sprite(
             frame, x, .6985f * aspect, .021f, .917f, 0f, dir, alpha,
-            brightness = .42f + .36f * daylight(f), saturation = .6f,
+            brightness = (.42f + .36f * daylight(f)) * nightLight(f, .6f), saturation = .6f,
         )
     }
 
@@ -344,7 +352,7 @@ class OverlayPainter(private val aspect: Float) {
         val age = t * 22f
         val flapping = t < .1f || t > .9f || (t > .47f && t < .52f)
         val dir = if (vx >= 0) 1f else -1f
-        val b = .45f + .45f * daylight(f)
+        val b = (.45f + .45f * daylight(f)) * nightLight(f, .6f)
         val batch = sprites.getValue(Atlas.BUZZARD)
         val x = now[0]; val y = now[1] * aspect; val width = .05f * now[2]
         if (flapping) {
@@ -361,7 +369,7 @@ class OverlayPainter(private val aspect: Float) {
         // A loose V high up, heading south-west, each bird on its own wingbeat.
         val leadX = 1.12f - 1.36f * t
         val leadY = .17f - .03f * t + .005f * sin(t * 5)
-        val b = .42f + .38f * daylight(f)
+        val b = (.42f + .38f * daylight(f)) * nightLight(f, .6f)
         val batch = sprites.getValue(Atlas.GOOSE)
         for (i in 0 until 9) {
             val k = (i + 1) / 2
@@ -453,7 +461,7 @@ class OverlayPainter(private val aspect: Float) {
             state = state * 1664525 + 1013904223
             return (state ushr 8) / 16777216f
         }
-        val b = .38f + .5f * daylight(f)
+        val b = (.38f + .5f * daylight(f)) * nightLight(f, .6f)
         val fade = 1 - smooth(.8f, 1f, t)
         for (i in 0 until f.flushCount) {
             val side = if (next() < .5f) 1f else -1f
