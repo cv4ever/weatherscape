@@ -35,6 +35,7 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
     private var stars = 0
     private var birdAtlas = 0
     private var squirrelAtlas = 0
+    private var grain = 0
     private val landscapeUniforms = HashMap<String, Int>()
     private val effectUniforms = HashMap<String, Int>()
     private var width = 1
@@ -44,8 +45,8 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         landscape = program("landscape")
         effects = program("overlay")
-        for (name in listOf("cropOffset", "cropScale", "landscape", "stars", "phase", "gust", "flash", "sunbeam", "rainbow",
-            "dim", "air", "ground", "sky", "horizonColor", "mist", "light")) {
+        for (name in listOf("cropOffset", "cropScale", "landscape", "stars", "grain", "phase", "flow", "gust", "flash", "sunbeam",
+            "rainbow", "dim", "air", "ground", "sky", "horizonColor", "mist", "light")) {
             landscapeUniforms[name] = glGetUniformLocation(landscape, name)
         }
         for (name in listOf("cropOffset", "cropScale", "plateAspect", "atlas", "dim")) {
@@ -55,6 +56,7 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
         stars = texture("textures/milky_way.webp")
         birdAtlas = texture("textures/bird_atlas.webp")
         squirrelAtlas = texture("textures/squirrel_atlas.webp")
+        grain = grainTexture()
         glDisable(GL_DEPTH_TEST)
         glClearColor(0f, 0f, 0f, 1f)
     }
@@ -94,8 +96,10 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
         glUniform2f(u.getValue("cropOffset"), crop[0], crop[1])
         glUniform2f(u.getValue("cropScale"), crop[2], crop[3])
         glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, plate); glUniform1i(u.getValue("landscape"), 0)
+        glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D, grain); glUniform1i(u.getValue("grain"), 2)
         glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, stars); glUniform1i(u.getValue("stars"), 1)
         glUniform1f(u.getValue("phase"), frame.phase)
+        glUniform1f(u.getValue("flow"), frame.flow)
         glUniform1f(u.getValue("gust"), frame.gust)
         glUniform1f(u.getValue("flash"), frame.flash)
         glUniform1f(u.getValue("sunbeam"), frame.sunbeam)
@@ -169,6 +173,22 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
         glGetProgramiv(id, GL_LINK_STATUS, ok, 0)
         check(ok[0] != 0) { "Program $name failed: ${glGetProgramInfoLog(id)}" }
         return id
+    }
+
+    /** Fixed-seed random bytes the shader's value noise reads instead of computing a hash. */
+    private fun grainTexture(): Int {
+        val random = java.util.Random(0x5eed)
+        val bytes = ByteArray(256 * 256).also { random.nextBytes(it) }
+        val ids = IntArray(1)
+        glGenTextures(1, ids, 0)
+        glBindTexture(GL_TEXTURE_2D, ids[0])
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT)
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 1)
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, 256, 256, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, ByteBuffer.wrap(bytes))
+        return ids[0]
     }
 
     private fun texture(path: String): Int {

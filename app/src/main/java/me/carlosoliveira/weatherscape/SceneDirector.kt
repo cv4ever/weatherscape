@@ -12,6 +12,8 @@ import kotlin.random.Random
 /** Everything the renderer needs for one frame. Reused between frames to avoid allocation. */
 class Frame {
     var phase = 0f
+    /** Continuous time in 18-second units for fog and cloud drift; wraps every five hours. */
+    var flow = 0f
     var gust = 1f
     var flash = 0f
     var sunbeam = 0f
@@ -79,6 +81,7 @@ class SceneDirector {
         lastTime = time
         val still = s.reducedMotion
         out.phase = if (still) .16f else ((time % 1800) / 18).toFloat()
+        out.flow = if (still) 3f else ((time % 18000) / 18).toFloat()
 
         val preview = previewKind
         val previewAge = time - previewStart

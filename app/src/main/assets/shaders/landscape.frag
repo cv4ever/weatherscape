@@ -2,7 +2,12 @@ precision highp float;
 // Coordinates are plate UVs: x 0..1 left to right, y 0..1 top to bottom.
 varying vec2 uv;
 uniform sampler2D landscape, stars;
+// 256x256 random bytes, nearest filtering, repeating. Arithmetic hashes break on Adreno: the
+// compiler fuses each inlined call differently, so neighbouring noise cells disagree and seams appear.
+uniform sampler2D grain;
 uniform float phase, gust, flash, sunbeam, rainbow, dim;
+// Continuous time in 18-second units. Fog and clouds advect on it without ever looping or cross-fading.
+uniform float flow;
 // air: wind, valley mist, cloud cover, rainfall.
 uniform vec4 air;
 uniform vec3 ground, sky, horizonColor, mist;
@@ -10,7 +15,7 @@ uniform vec3 ground, sky, horizonColor, mist;
 uniform vec3 light;
 const float tau = 6.2831853;
 
-float hash(vec2 p) { vec3 q = fract(vec3(p.xyx) * .1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
+float hash(vec2 p) { return texture2D(grain, (mod(floor(p), 256.) + .5) / 256.).r; }
 float noise(vec2 p) {
   vec2 i = floor(p), f = fract(p); f = f * f * (3. - 2. * f);
   return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
@@ -23,16 +28,15 @@ float breeze(vec2 p, float x, float tip, float root, float width, float lag) {
   float wave = .52 * sin(tau * phase * 3. - lag) + .23 * sin(tau * phase * 7. - lag * 1.7) + .25 * sin(tau * phase - .9);
   return crown * bend * bend * wave * gust;
 }
+// Timelapse vapor: the pattern drifts with the wind and its finer octaves slide at their own
+// speeds, so the shapes keep changing as they move, like clouds filmed at a high speed-up.
 float vapor(vec2 xy, float speed, float seed) {
-  float n = 0.;
-  for (int i = 0; i < 2; i++) {
-    float u = fract(phase + float(i) * .5 + seed * .17);
-    vec2 q = xy + vec2(seed - u * speed, 0.);
-    float pattern = .66 * noise(q) + .23 * noise(q * 2.3) + .11 * noise(q * 5.1);
-    float weight = sin(u * 3.14159265);
-    n += weight * weight * smoothstep(.20, .80, pattern);
-  }
-  return n;
+  float travel = flow * speed;
+  vec2 q = xy + vec2(seed - travel, seed * .37);
+  float body = noise(q + vec2(0., flow * .11));
+  float billow = noise(q * 2.3 + vec2(travel * .42, -flow * .31));
+  float wisp = noise(q * 5.1 - vec2(travel * .67, flow * .23));
+  return smoothstep(.20, .80, .62 * body + .25 * billow + .13 * wisp);
 }
 float bank(vec2 p, float center, float depth, float seed, float speed) {
   float position = center + .010 * sin(p.x * 5.4 + seed) + .005 * sin(p.x * 13. + seed);
@@ -49,7 +53,8 @@ void main() {
       + .008 * breeze(p, .927, .701, .98, .067, 2.8));
   }
   vec3 base = texture2D(landscape, vec2(clamp(p.x - shift, 0., 1.), p.y)).rgb;
-  float opening = .5 - .5 * cos(phase * tau);
+  // Light through the cloud breathes over a few minutes rather than pulsing every loop.
+  float opening = .5 - .5 * cos(flow * tau / 9.);
   float cover = air.z;
   float sun = 1. - cover * .91;
   float luma = dot(base, vec3(.2126, .7152, .0722));
@@ -91,7 +96,9 @@ void main() {
       float sheet = vapor(p * vec2(2.9, 9. + 9. * (1. - cover)), 1.9 + air.x * 1.5, 6.7);
       float relief = smoothstep(.17, .86, sheet) * (.24 + .76 * (1. - horizon));
       vec3 ceiling = mix(vec3(.28, .34, .40), mist, .48 + .35 * horizon);
-      ceiling *= mix(1.05, .67, air.w);
+      // Cloud undersides only catch as much light as the sky has: dim at dusk, near black at night.
+      float skyLight = smoothstep(.09, .55, dot(sky, vec3(.333)));
+      ceiling *= mix(1.05, .67, air.w) * mix(.3, 1., skyLight);
       aerial = mix(aerial, ceiling * (.79 + .32 * relief), cover * mix(.65, .98, relief));
     }
     scene = mix(scene, aerial, skyMatte);
