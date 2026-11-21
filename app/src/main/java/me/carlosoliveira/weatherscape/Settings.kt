@@ -30,6 +30,8 @@ data class Settings(
     val frequency: Frequency = Frequency.OCCASIONAL,
     val reducedMotion: Boolean = false,
     val frameRate: Int = 30,
+    /** Multiplier on how fast fog and clouds drift; 1 matches the preview. */
+    val cloudSpeed: Float = 1f,
     val quality: Quality = Quality.BALANCED,
     val dimPercent: Int = 0,
     val pauseOnBatterySaver: Boolean = true,
@@ -65,6 +67,7 @@ object SettingsStore {
             frequency = p.enum("frequency", d.frequency),
             reducedMotion = p.getBoolean("reduced_motion", d.reducedMotion),
             frameRate = p.getInt("frame_rate", d.frameRate),
+            cloudSpeed = p.getFloat("cloud_speed", d.cloudSpeed),
             quality = p.enum("quality", d.quality),
             dimPercent = p.getInt("dim_percent", d.dimPercent),
             pauseOnBatterySaver = p.getBoolean("pause_on_battery_saver", d.pauseOnBatterySaver),
@@ -85,6 +88,7 @@ object SettingsStore {
         putString("frequency", s.frequency.name)
         putBoolean("reduced_motion", s.reducedMotion)
         putInt("frame_rate", s.frameRate)
+        putFloat("cloud_speed", s.cloudSpeed)
         putString("quality", s.quality.name)
         putInt("dim_percent", s.dimPercent)
         putBoolean("pause_on_battery_saver", s.pauseOnBatterySaver)

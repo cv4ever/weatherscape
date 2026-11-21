@@ -46,6 +46,7 @@ class SceneDirector {
     private val blended = FloatArray(4)
     private var hasBlend = false
     private var lastTime = 0.0
+    private var flow = 0.0
     private var targetThunder = false
     private var nextFlashAt = 0.0
     private var flashStartedAt = -100.0
@@ -81,7 +82,9 @@ class SceneDirector {
         lastTime = time
         val still = s.reducedMotion
         out.phase = if (still) .16f else ((time % 1800) / 18).toFloat()
-        out.flow = if (still) 3f else ((time % 18000) / 18).toFloat()
+        // Integrated rather than derived from the clock, so changing the speed never makes the sky jump.
+        if (!still) flow = (flow + dt / 18 * s.cloudSpeed) % 1000
+        out.flow = if (still) 3f else flow.toFloat()
 
         val preview = previewKind
         val previewAge = time - previewStart

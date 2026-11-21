@@ -274,6 +274,15 @@ private fun SettingsScreen(active: Boolean, onSetWallpaper: () -> Unit, onRefres
                     listOf(Quality.BATTERY to "Battery saver", Quality.BALANCED to "Balanced", Quality.SHARP to "Sharp"),
                     s.quality,
                 ) { update(s.copy(quality = it)) }
+                Label("Cloud and fog speed: ${String.format(java.util.Locale.US, "%.2f", s.cloudSpeed).trimEnd('0').trimEnd('.')}×")
+                Slider(
+                    value = s.cloudSpeed,
+                    onValueChange = { s = s.copy(cloudSpeed = (it * 4).roundToInt() / 4f) },
+                    onValueChangeFinished = { update(s) },
+                    valueRange = .25f..3f,
+                    steps = 10,
+                )
+                Hint("1× matches the preview. Slower feels calm, faster looks more like a timelapse.")
                 Label("Darken for readability: ${s.dimPercent}%")
                 Slider(
                     value = s.dimPercent.toFloat(),
