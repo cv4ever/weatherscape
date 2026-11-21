@@ -28,9 +28,15 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
     private val painter = OverlayPainter(ASPECT)
     private val quad = floatBuffer(floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f))
     private val overlay = floatBuffer(FloatArray(painter.effects.data.size))
+    private val lens = LensDrops()
+    private val lensBuffer = floatBuffer(lens.vertices)
+    private var lensTime = 0.0
 
     private var landscape = 0
     private var effects = 0
+    private var glass = 0
+    /** Copy of the frame behind the lens drops, sized to the surface. */
+    private var frameCopy = 0
     private var plate = 0
     private var stars = 0
     private var moonTexture = 0
@@ -40,6 +46,7 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
     private var grain = 0
     private val landscapeUniforms = HashMap<String, Int>()
     private val effectUniforms = HashMap<String, Int>()
+    private val glassUniforms = HashMap<String, Int>()
     private var width = 1
     private var height = 1
     private val crop = FloatArray(4)
@@ -47,6 +54,8 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         landscape = program("landscape")
         effects = program("overlay")
+        glass = program("glass")
+        for (name in listOf("scene", "texel", "reach", "daylight")) glassUniforms[name] = glGetUniformLocation(glass, name)
         for (name in listOf("cropOffset", "cropScale", "landscape", "stars", "grain", "moonTexture", "fogTexture",
             "auroraTexture", "phase", "flow", "gust", "flash", "sunbeam", "rainbow", "dim", "air", "ground", "sky",
             "horizonColor", "mist", "light", "moon", "moonLight", "moonGlow", "aurora", "snowCover", "reveal", "fogRoll",
@@ -64,6 +73,8 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
         fogTexture = texture("textures/fog_bank.webp", GL_MIRRORED_REPEAT)
         auroraTexture = texture("textures/aurora.webp", GL_MIRRORED_REPEAT)
         grain = grainTexture()
+        frameCopy = IntArray(1).also { glGenTextures(1, it, 0) }[0]
+        allocateFrameCopy()
         glDisable(GL_DEPTH_TEST)
         glClearColor(0f, 0f, 0f, 1f)
     }
@@ -72,15 +83,64 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
         this.width = width
         this.height = height
         glViewport(0, 0, width, height)
+        allocateFrameCopy()
+    }
+
+    private fun allocateFrameCopy() {
+        glBindTexture(GL_TEXTURE_2D, frameCopy)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, null)
     }
 
     override fun onDrawFrame(gl: GL10?) {
-        director.update(SystemClock.elapsedRealtimeNanos() / 1e9, System.currentTimeMillis(), frame)
+        val time = SystemClock.elapsedRealtimeNanos() / 1e9
+        director.update(time, System.currentTimeMillis(), frame)
         lastSunAltitude = frame.sunAltitude
         computeCrop()
         drawLandscape()
         painter.paint(frame)
         drawOverlays()
+        drawLens(time)
+    }
+
+    /** Raindrops on the camera glass: each refracts a copy of the frame drawn so far. */
+    private fun drawLens(time: Double) {
+        val s = director.settings
+        val dt = time - lensTime
+        lensTime = time
+        if (!s.lensDrops) { lens.clear(); return }
+        // Rare redraws (reduced motion, Battery Saver) hold a still set of drops instead of simulating.
+        val step = if (dt > 1.0 || s.reducedMotion) null else dt.toFloat()
+        val metrics = context.resources.displayMetrics
+        val unitsWide = metrics.widthPixels / metrics.density / PREVIEW_WIDTH_DP
+        lens.update(step, frame.air[3], frame.air[0], unitsWide, unitsWide * height / width)
+        if (lens.vertexCount == 0) return
+        glBindTexture(GL_TEXTURE_2D, frameCopy)
+        glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, width, height)
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA)
+        glUseProgram(glass)
+        val u = glassUniforms
+        glActiveTexture(GL_TEXTURE0)
+        glBindTexture(GL_TEXTURE_2D, frameCopy)
+        glUniform1i(u.getValue("scene"), 0)
+        glUniform2f(u.getValue("texel"), 1f / width, 1f / height)
+        // Taller reach so drops in the sky still catch the dark ridges, upside down.
+        glUniform2f(u.getValue("reach"), .3f, .55f * width / height)
+        glUniform1f(u.getValue("daylight"), ((frame.sky[0] + frame.sky[1] + frame.sky[2]) / 1.6f).coerceAtMost(1f))
+        lensBuffer.clear()
+        lensBuffer.put(lens.vertices, 0, lens.vertexCount * LensDrops.STRIDE)
+        val stride = LensDrops.STRIDE * 4
+        val position = glGetAttribLocation(glass, "position")
+        val local = glGetAttribLocation(glass, "local")
+        lensBuffer.position(0); glVertexAttribPointer(position, 2, GL_FLOAT, false, stride, lensBuffer)
+        lensBuffer.position(2); glVertexAttribPointer(local, 2, GL_FLOAT, false, stride, lensBuffer)
+        glEnableVertexAttribArray(position); glEnableVertexAttribArray(local)
+        glDrawArrays(GL_TRIANGLES, 0, lens.vertexCount)
+        glDisableVertexAttribArray(position); glDisableVertexAttribArray(local)
     }
 
     /** Cover-fits the 9:16 plate: crop the sides on tall screens, the sky and foreground on wide ones. */
@@ -234,6 +294,8 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
         private const val TAG = "Weatherscape"
         /** Plate height over width (1152 x 2048). */
         const val ASPECT = 2048f / 1152f
+        /** Width of the HTML preview's wall, the unit lens drops are sized in. */
+        private const val PREVIEW_WIDTH_DP = 380f
 
         private fun floatBuffer(values: FloatArray): FloatBuffer =
             ByteBuffer.allocateDirect(values.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().apply {

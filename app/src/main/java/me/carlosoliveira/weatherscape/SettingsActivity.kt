@@ -252,6 +252,9 @@ private fun SettingsScreen(active: Boolean, onSetWallpaper: () -> Unit, onRefres
                 SwitchRow("Seasons", "Colder light in winter, fresher greens in spring, warmer late summers.", s.seasons) {
                     update(s.copy(seasons = it))
                 }
+                SwitchRow("Raindrops on the lens", "Drops gather on the glass while it rains, slide down, and dry afterwards.", s.lensDrops) {
+                    update(s.copy(lensDrops = it))
+                }
 
                 Section("Wildlife and sky moments")
                 SwitchRow("Show moments", "Wildlife, fog, the moon, aurora and more, only when the weather and light fit.", s.moments) {

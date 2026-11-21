@@ -44,6 +44,8 @@ data class Settings(
     val unlockReveal: Boolean = true,
     /** Tapping empty home screen flushes birds from the trees. */
     val tapToWake: Boolean = true,
+    /** Raindrops gather on the camera glass while it rains, slide down, and dry afterwards. */
+    val lensDrops: Boolean = true,
 )
 
 /** One SharedPreferences file shared by the settings screen and the wallpaper engine. */
@@ -83,6 +85,7 @@ object SettingsStore {
             seasons = p.getBoolean("seasons", d.seasons),
             unlockReveal = p.getBoolean("unlock_reveal", d.unlockReveal),
             tapToWake = p.getBoolean("tap_to_wake", d.tapToWake),
+            lensDrops = p.getBoolean("lens_drops", d.lensDrops),
         )
     }
 
@@ -107,6 +110,7 @@ object SettingsStore {
         putBoolean("seasons", s.seasons)
         putBoolean("unlock_reveal", s.unlockReveal)
         putBoolean("tap_to_wake", s.tapToWake)
+        putBoolean("lens_drops", s.lensDrops)
     }
 
     fun requestPreview(context: Context, kind: MomentKind) = prefs(context).edit {
