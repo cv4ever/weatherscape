@@ -186,13 +186,7 @@ class SceneDirector {
     private fun live(time: Double, dt: Double, nowMillis: Long, out: Frame, still: Boolean) {
         val s = settings
         val (day, nowMinute) = solarFor(s, Instant.ofEpochMilli(nowMillis))
-        val minute = when (s.time) {
-            TimeChoice.AUTO -> nowMinute
-            TimeChoice.MORNING -> day.sunrise + 75
-            TimeChoice.AFTERNOON -> minOf(day.noon + 150, day.sunset - 70)
-            TimeChoice.SUNSET -> day.sunset + 2
-            TimeChoice.NIGHT -> day.sunset + 150
-        }
+        val minute = s.time.minuteOn(day, nowMinute)
         ambient(day, minute, out)
         timelapseRainbowGate = false
 

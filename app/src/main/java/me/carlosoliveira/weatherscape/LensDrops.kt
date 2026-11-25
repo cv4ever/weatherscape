@@ -3,6 +3,7 @@ package me.carlosoliveira.weatherscape
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlin.math.sqrt
 import kotlin.random.Random
 
@@ -118,7 +119,7 @@ class LensDrops {
         } else {
             // After the shower the glass dries: beads first, then the drops.
             for (i in 0 until beads) br[i] -= .001f * size * drying * dt
-            for (i in 0 until drops) dr[i] -= .0022f * size * drying * dt
+            for (i in 0 until drops) dr[i] -= DRY_RATE * size * drying * dt
         }
         var i = beads - 1
         var k = splashes - 1
@@ -141,7 +142,7 @@ class LensDrops {
     }
 
     private fun slide(d: Int, dt: Float, rain: Float, wind: Float) {
-        if (dr[d] < .0035f * size || dy[d] - dr[d] > h) { removeDrop(d); return }
+        if (dr[d] < GONE * size || dy[d] - dr[d] > h) { removeDrop(d); return }
         if (rain > .01f && vy[d] == 0f) dr[d] += .0024f * size * rain * dt * Random.nextFloat()
         val slide = SLIDE * size
         if (dr[d] < slide) { vy[d] = 0f; return }
@@ -253,6 +254,12 @@ class LensDrops {
 
     companion object {
         const val STRIDE = 7
+
+        /** Seconds the largest falling drop takes to dry once the rain stops, at [drying] speed. */
+        fun secondsToDry(drying: Float): Int = ((.033f - GONE) / DRY_RATE / drying).roundToInt()
+
+        private const val DRY_RATE = .0022f
+        private const val GONE = .0035f
         // Room for the heaviest amount on the unfolded inner display, about twice the cover screen's glass.
         private const val MAX_BEADS = 3000
         private const val MAX_DROPS = 160

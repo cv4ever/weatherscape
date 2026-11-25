@@ -236,6 +236,6 @@ class PineValleyWallpaperService : WallpaperService() {
     }
 
     companion object {
-        private const val CALM_FPS = 15
+        const val CALM_FPS = 15
     }
 }

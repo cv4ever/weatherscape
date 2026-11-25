@@ -7,6 +7,16 @@ import androidx.core.content.edit
 enum class Mode { LIVE, TIMELAPSE }
 enum class WeatherChoice { AUTO, SUNNY, WINDY, RAINY, STORM, FOGGY, SNOWY }
 enum class TimeChoice { AUTO, MORNING, AFTERNOON, SUNSET, NIGHT }
+
+/** Minute after 00:00 UTC that this choice shows on [day]; [now] when following the sun. */
+fun TimeChoice.minuteOn(day: SolarDay, now: Double): Double = when (this) {
+    TimeChoice.AUTO -> now
+    TimeChoice.MORNING -> day.sunrise + 75
+    TimeChoice.AFTERNOON -> minOf(day.noon + 150, day.sunset - 70)
+    TimeChoice.SUNSET -> day.sunset + 2
+    TimeChoice.NIGHT -> day.sunset + 150
+}
+
 enum class Frequency(val visibleChance: Float, val cooldownSeconds: Int) {
     RARE(.18f, 25 * 60), OCCASIONAL(.38f, 8 * 60), OFTEN(.75f, 90)
 }
