@@ -2,6 +2,7 @@ package me.carlosoliveira.weatherscape
 
 import android.content.Context
 import android.graphics.BitmapFactory
+import android.opengl.GLES11Ext
 import android.opengl.GLES20.*
 import android.opengl.GLSurfaceView
 import android.opengl.GLUtils
@@ -17,10 +18,10 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * Draws Pine Valley: one full-screen pass for the landscape, then rain and moments as overlays.
- * Everything runs on the GL thread; [pan] and [dim] are written from the main thread.
+ * Draws one [scenery]: a full-screen pass for the landscape and sky, rain and moments as overlays,
+ * then the glass. Everything runs on the GL thread; [pan] and [dim] are written from the main thread.
  */
-class SceneRenderer(private val context: Context, val director: SceneDirector) : GLSurfaceView.Renderer {
+class SceneRenderer(private val context: Context, val director: SceneDirector, private val scenery: Scenery) : GLSurfaceView.Renderer {
     @Volatile var pan = .5f
     @Volatile var dim = 0f
     /** Sun altitude of the last drawn frame, for the system's wallpaper colour hints. */
@@ -32,6 +33,8 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
      */
     @Volatile var busy = true
         private set
+    /** Rock Jetty's sea and rocks; null for sceneries drawn from a still plate. */
+    val video = if (scenery == Scenery.ROCK_JETTY) VideoLoop(context, "video/rock_jetty.mp4") else null
 
     private val frame = Frame()
     private val painter = OverlayPainter(ASPECT)
@@ -62,6 +65,7 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
     /** Copy of the frame behind the lens drops, sized to the surface. */
     private var frameCopy = 0
     private var plate = 0
+    private var seaMask = 0
     private var stars = 0
     private var moonTexture = 0
     private var fogTexture = 0
@@ -77,7 +81,10 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
     private val crop = FloatArray(4)
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
-        landscape = program("landscape")
+        landscape = program(
+            scenery.shader, vertex = "landscape",
+            prelude = if (video != null) listOf("external.glsl", "sky.glsl") else listOf("sky.glsl"),
+        )
         effects = program("overlay")
         glass = program("glass")
         for (name in listOf("scene", "texel", "reach", "daylight")) glassUniforms[name] = glGetUniformLocation(glass, name)
@@ -86,19 +93,24 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
         for (name in listOf("cropOffset", "cropScale", "landscape", "stars", "grain", "moonTexture", "fogTexture",
             "auroraTexture", "phase", "flow", "gust", "flash", "sunbeam", "rainbow", "dim", "air", "ground", "sky",
             "horizonColor", "mist", "light", "moon", "moonLight", "moonGlow", "aurora", "snowCover", "reveal", "fogRoll",
-            "season")) {
+            "season", "video", "seaMask", "videoMatrix", "wet")) {
             landscapeUniforms[name] = glGetUniformLocation(landscape, name)
         }
         for (name in listOf("cropOffset", "cropScale", "plateAspect", "atlas", "dim")) {
             effectUniforms[name] = glGetUniformLocation(effects, name)
         }
-        plate = texture("textures/pine_valley.webp")
         stars = texture("textures/milky_way.webp")
-        for (atlas in Atlas.entries) atlases[atlas] = texture(atlas.path)
         moonTexture = texture("textures/moon.webp")
-        // The fog bank and aurora tile sideways as they drift.
-        fogTexture = texture("textures/fog_bank.webp", GL_MIRRORED_REPEAT)
         auroraTexture = texture("textures/aurora.webp", GL_MIRRORED_REPEAT)
+        if (video != null) {
+            video.create()
+            seaMask = texture("textures/rock_jetty_sea.png")
+        } else {
+            plate = texture("textures/pine_valley.webp")
+            // The fog bank tiles sideways as it drifts.
+            fogTexture = texture("textures/fog_bank.webp", GL_MIRRORED_REPEAT)
+        }
+        if (scenery.wildlife) for (atlas in Atlas.entries) atlases[atlas] = texture(atlas.path)
         grain = grainTexture()
         frameCopy = IntArray(1).also { glGenTextures(1, it, 0) }[0]
         allocateFrameCopy()
@@ -125,6 +137,7 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
     override fun onDrawFrame(gl: GL10?) {
         val time = SystemClock.elapsedRealtimeNanos() / 1e9
         director.update(time, System.currentTimeMillis(), frame)
+        video?.update()
         lastSunAltitude = frame.sunAltitude
         computeCrop()
         drawLandscape()
@@ -133,7 +146,7 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
         drawLens(time)
         busy = frame.moment != null || frame.flushProgress >= 0f || frame.reveal > .01f || frame.flash > .001f ||
             frame.air[3] > .01f || frame.snow > .01f || frame.air[0] > 1.3f || lens.vertexCount > 0 ||
-            abs(mistLevel - mistTarget) > .01f
+            abs(mistLevel - mistTarget) > .01f || video?.playing == true
     }
 
     /** Condensation and raindrops on the camera glass, both refracting a copy of the frame drawn so far. */
@@ -241,11 +254,18 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
         val u = landscapeUniforms
         glUniform2f(u.getValue("cropOffset"), crop[0], crop[1])
         glUniform2f(u.getValue("cropScale"), crop[2], crop[3])
-        glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, plate); glUniform1i(u.getValue("landscape"), 0)
+        if (video != null) {
+            glActiveTexture(GL_TEXTURE0); glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, video.texture); glUniform1i(u.getValue("video"), 0)
+            glActiveTexture(GL_TEXTURE6); glBindTexture(GL_TEXTURE_2D, seaMask); glUniform1i(u.getValue("seaMask"), 6)
+            glUniformMatrix4fv(u.getValue("videoMatrix"), 1, false, video.matrix, 0)
+            glUniform1f(u.getValue("wet"), frame.wet)
+        } else {
+            glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, plate); glUniform1i(u.getValue("landscape"), 0)
+            glActiveTexture(GL_TEXTURE4); glBindTexture(GL_TEXTURE_2D, fogTexture); glUniform1i(u.getValue("fogTexture"), 4)
+        }
         glActiveTexture(GL_TEXTURE2); glBindTexture(GL_TEXTURE_2D, grain); glUniform1i(u.getValue("grain"), 2)
         glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_2D, stars); glUniform1i(u.getValue("stars"), 1)
         glActiveTexture(GL_TEXTURE3); glBindTexture(GL_TEXTURE_2D, moonTexture); glUniform1i(u.getValue("moonTexture"), 3)
-        glActiveTexture(GL_TEXTURE4); glBindTexture(GL_TEXTURE_2D, fogTexture); glUniform1i(u.getValue("fogTexture"), 4)
         glActiveTexture(GL_TEXTURE5); glBindTexture(GL_TEXTURE_2D, auroraTexture); glUniform1i(u.getValue("auroraTexture"), 5)
         glUniform1f(u.getValue("phase"), frame.phase)
         glUniform1f(u.getValue("flow"), frame.flow)
@@ -290,7 +310,7 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
         glUniform1i(u.getValue("atlas"), 0)
         glActiveTexture(GL_TEXTURE0)
         draw(painter.effects, grain)
-        for (atlas in Atlas.ALL) draw(painter.sprites.getValue(atlas), atlases.getValue(atlas))
+        for (atlas in Atlas.ALL) painter.sprites.getValue(atlas).let { if (it.vertices > 0) draw(it, atlases.getValue(atlas)) }
     }
 
     /** Maps a touch on the screen to plate coordinates, using the crop of the last frame drawn. */
@@ -316,20 +336,21 @@ class SceneRenderer(private val context: Context, val director: SceneDirector) :
         glDisableVertexAttribArray(position); glDisableVertexAttribArray(color); glDisableVertexAttribArray(shape)
     }
 
-    private fun program(name: String, vertex: String = name): Int {
-        fun compile(type: Int, file: String): Int {
-            val source = context.assets.open("shaders/$file").bufferedReader().use { it.readText() }
+    /** Links [name].frag after the [prelude] files, which hold code that several fragment shaders share. */
+    private fun program(name: String, vertex: String = name, prelude: List<String> = emptyList()): Int {
+        fun read(file: String) = context.assets.open("shaders/$file").bufferedReader().use { it.readText() }
+        fun compile(type: Int, files: List<String>): Int {
             val shader = glCreateShader(type)
-            glShaderSource(shader, source)
+            glShaderSource(shader, files.joinToString("\n") { read(it) })
             glCompileShader(shader)
             val ok = IntArray(1)
             glGetShaderiv(shader, GL_COMPILE_STATUS, ok, 0)
-            check(ok[0] != 0) { "Shader $file failed: ${glGetShaderInfoLog(shader)}" }
+            check(ok[0] != 0) { "Shader ${files.last()} failed: ${glGetShaderInfoLog(shader)}" }
             return shader
         }
         val id = glCreateProgram()
-        glAttachShader(id, compile(GL_VERTEX_SHADER, "$vertex.vert"))
-        glAttachShader(id, compile(GL_FRAGMENT_SHADER, "$name.frag"))
+        glAttachShader(id, compile(GL_VERTEX_SHADER, listOf("$vertex.vert")))
+        glAttachShader(id, compile(GL_FRAGMENT_SHADER, prelude + "$name.frag"))
         glLinkProgram(id)
         val ok = IntArray(1)
         glGetProgramiv(id, GL_LINK_STATUS, ok, 0)

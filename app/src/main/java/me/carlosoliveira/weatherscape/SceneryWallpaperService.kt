@@ -20,7 +20,8 @@ import android.view.Choreographer
 import android.view.SurfaceHolder
 import kotlin.math.roundToInt
 
-class PineValleyWallpaperService : WallpaperService() {
+/** One wallpaper per [scenery]; the subclasses exist so the system lists each one by name. */
+abstract class SceneryWallpaperService(private val scenery: Scenery) : WallpaperService() {
     private val engines = mutableSetOf<SceneEngine>()
 
     override fun onCreateEngine(): Engine = SceneEngine().also { engines += it }
@@ -32,9 +33,9 @@ class PineValleyWallpaperService : WallpaperService() {
     }
 
     inner class SceneEngine : Engine(), SharedPreferences.OnSharedPreferenceChangeListener, Choreographer.FrameCallback {
-        private val prefs = SettingsStore.prefs(this@PineValleyWallpaperService)
-        private val director = SceneDirector()
-        private val renderer = SceneRenderer(applicationContext, director)
+        private val prefs = SettingsStore.prefs(this@SceneryWallpaperService)
+        private val director = SceneDirector(scenery.wildlife)
+        private val renderer = SceneRenderer(applicationContext, director, scenery)
         private val refresher = WeatherRefresher(applicationContext) { director.weather = it }
         private var view: SceneView? = null
         private var settings = Settings()
@@ -56,7 +57,7 @@ class PineValleyWallpaperService : WallpaperService() {
         }
 
         /** GLSurfaceView drawing into the wallpaper's surface instead of a window's. */
-        private inner class SceneView : GLSurfaceView(this@PineValleyWallpaperService) {
+        private inner class SceneView : GLSurfaceView(this@SceneryWallpaperService) {
             override fun getHolder(): SurfaceHolder = surfaceHolder
             fun destroy() = super.onDetachedFromWindow()
         }
@@ -81,6 +82,7 @@ class PineValleyWallpaperService : WallpaperService() {
             prefs.unregisterOnSharedPreferenceChangeListener(this)
             if (!isPreview) unregisterReceiver(unlockReceiver)
             Choreographer.getInstance().removeFrameCallback(this)
+            renderer.video?.close()
             view?.destroy()
             refresher.close()
             engines -= this
@@ -108,6 +110,7 @@ class PineValleyWallpaperService : WallpaperService() {
                 Choreographer.getInstance().postFrameCallback(this)
             } else {
                 Choreographer.getInstance().removeFrameCallback(this)
+                renderer.video?.playing = false
                 view.onPause()
             }
         }
@@ -142,6 +145,8 @@ class PineValleyWallpaperService : WallpaperService() {
         override fun doFrame(frameTimeNanos: Long) {
             if (!visible) return
             val still = settings.reducedMotion || (settings.pauseOnBatterySaver && power?.isPowerSaveMode == true)
+            // Moving water needs the video; a still scene holds its current frame.
+            renderer.video?.playing = !still
             val rate = if (settings.calmSaver && !renderer.busy) minOf(settings.frameRate, CALM_FPS) else settings.frameRate
             val interval = if (still) 30_000_000_000L else 1_000_000_000L / rate.coerceIn(10, 60)
             if (frameTimeNanos - lastFrameNanos >= interval - 2_000_000) {
@@ -168,7 +173,7 @@ class PineValleyWallpaperService : WallpaperService() {
         }
 
         private fun applySettings() {
-            settings = SettingsStore.read(this@PineValleyWallpaperService)
+            settings = SettingsStore.read(this@SceneryWallpaperService)
             director.settings = settings
             renderer.dim = settings.dimPercent / 100f
             if (!settings.parallax) renderer.pan = .5f
@@ -223,9 +228,10 @@ class PineValleyWallpaperService : WallpaperService() {
 
         override fun onComputeColors(): WallpaperColors {
             val night = nightColors ?: (renderer.lastSunAltitude < -4)
-            val primary = Color.valueOf(if (night) 0xff1c2a44.toInt() else 0xff9fb6c6.toInt())
-            val secondary = Color.valueOf(if (night) 0xff13231c.toInt() else 0xff2f4a3c.toInt())
-            val tertiary = Color.valueOf(if (night) 0xff3a4a6a.toInt() else 0xff6f8a78.toInt())
+            val palette = if (night) scenery.nightColors else scenery.dayColors
+            val primary = Color.valueOf(palette[0])
+            val secondary = Color.valueOf(palette[1])
+            val tertiary = Color.valueOf(palette[2])
             return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 // The sky behind the clock is pale by day, so dark text reads there.
                 WallpaperColors(primary, secondary, tertiary, if (night) 0 else WallpaperColors.HINT_SUPPORTS_DARK_TEXT)
@@ -239,3 +245,7 @@ class PineValleyWallpaperService : WallpaperService() {
         const val CALM_FPS = 15
     }
 }
+
+class PineValleyWallpaperService : SceneryWallpaperService(Scenery.PINE_VALLEY)
+
+class RockJettyWallpaperService : SceneryWallpaperService(Scenery.ROCK_JETTY)

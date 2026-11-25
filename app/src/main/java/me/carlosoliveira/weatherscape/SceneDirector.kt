@@ -47,6 +47,8 @@ class Frame {
     val season = floatArrayOf(1f, 1f, 1f, 1f)
     /** Mist thinning after an unlock, 0..1. */
     var reveal = 0f
+    /** Rain on the ground: 1 while it rains, fading over the two hours after. */
+    var wet = 0f
     /** Birds flushed from a treetop: origin in plate UV, progress 0..1 (negative when idle), bird count. */
     var flushX = 0f
     var flushY = 0f
@@ -57,9 +59,10 @@ class Frame {
 
 /**
  * Turns settings, weather and the clock into a [Frame]. Runs on the GL thread only;
- * [weather] and [settings] are swapped in from other threads as whole objects.
+ * [weather] and [settings] are swapped in from other threads as whole objects. [wildlife] places
+ * moments and flushed birds on Pine Valley's plate; other sceneries go without.
  */
-class SceneDirector {
+class SceneDirector(private val wildlife: Boolean = true) {
     @Volatile var settings = Settings()
     @Volatile var weather: WeatherReport? = null
 
@@ -107,7 +110,7 @@ class SceneDirector {
         if (!s.unlockReveal || s.reducedMotion) return
         unlockAt = time
         val (wind, _, _, rain) = blended
-        if (lastAltitude > 2 && rain < .05f && blended[4] < .1f && wind < 2.4f && Random.nextFloat() < .5f) {
+        if (wildlife && lastAltitude > 2 && rain < .05f && blended[4] < .1f && wind < 2.4f && Random.nextFloat() < .5f) {
             val tip = TREE_TIPS.random()
             startFlush(time, tip.first, tip.second, 1)
         }
@@ -116,7 +119,7 @@ class SceneDirector {
     /** A tap on the empty home screen at plate coordinates [x], [y]: birds burst from the nearest treetop. */
     fun onTap(time: Double, x: Float, y: Float) {
         val s = settings
-        if (!s.tapToWake || s.reducedMotion || time - flushStart < 4.5) return
+        if (!wildlife || !s.tapToWake || s.reducedMotion || time - flushStart < 4.5) return
         if (lastAltitude < -4 || blended[3] > .3f) return
         val tip = TREE_TIPS.minBy { abs(it.first - x) + .3f * abs(it.second - y) }
         startFlush(time, tip.first, tip.second, Random.nextInt(4, 7))
@@ -131,6 +134,7 @@ class SceneDirector {
     }
 
     fun preview(kind: MomentKind, time: Double) {
+        if (!wildlife) return
         previewKind = kind
         previewStart = time
         hasBlend = false
@@ -173,6 +177,8 @@ class SceneDirector {
         envelopes(out)
         val unlockAge = (time - unlockAt).toFloat()
         out.reveal = if (unlockAge in 0f..6f) smooth(0f, .8f, unlockAge) * (1 - smooth(2.5f, 6f, unlockAge)) else 0f
+        val drying = lastSinceRain?.let { 1 - smooth(1800f, 7200f, it.toFloat()) } ?: 0f
+        out.wet = maxOf(smooth(.02f, .2f, out.air[3]), drying)
         val flushAge = ((time - flushStart) / FLUSH_SECONDS).toFloat()
         out.flushProgress = if (flushAge in 0f..1f) flushAge else -1f
         out.flushX = flushX
@@ -273,7 +279,7 @@ class SceneDirector {
 
     private fun rollMoment(time: Double, chance: Float) {
         val s = settings
-        if (!s.moments || s.reducedMotion || momentKind != null) return
+        if (!wildlife || !s.moments || s.reducedMotion || momentKind != null) return
         if (time - momentEnd < s.frequency.cooldownSeconds) return
         if (Random.nextFloat() > chance) return
         val month = Instant.now().atZone(ZoneId.systemDefault()).monthValue

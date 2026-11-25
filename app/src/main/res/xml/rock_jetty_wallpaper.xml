@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<wallpaper xmlns:android="http://schemas.android.com/apk/res/android"
+    android:author="@string/author"
+    android:description="@string/jetty_description"
+    android:settingsActivity="me.carlosoliveira.weatherscape.SettingsActivity"
+    android:showMetadataInPreview="true"
+    android:thumbnail="@drawable/jetty_thumbnail" />

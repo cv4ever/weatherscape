@@ -21,6 +21,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -89,6 +90,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.heading
@@ -109,7 +112,8 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 class SettingsActivity : ComponentActivity() {
-    private val wallpaperActive = mutableStateOf(false)
+    /** The Weatherscape wallpaper currently set, or null when another wallpaper is. */
+    private val current = mutableStateOf<Scenery?>(null)
     private val refreshing = mutableStateOf(false)
     /** Bumped on every resume so the screen re-checks what may have changed elsewhere (widget, permission). */
     private val resumes = mutableIntStateOf(0)
@@ -123,7 +127,7 @@ class SettingsActivity : ComponentActivity() {
         setContent {
             WeatherscapeTheme {
                 SettingsScreen(
-                    active = wallpaperActive.value,
+                    current = current.value,
                     resumes = resumes.intValue,
                     refreshing = refreshing.value,
                     onSetWallpaper = ::openWallpaperPicker,
@@ -138,7 +142,7 @@ class SettingsActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         val info = WallpaperManager.getInstance(this).wallpaperInfo
-        wallpaperActive.value = info?.serviceName == PineValleyWallpaperService::class.java.name
+        current.value = Scenery.ofService(info?.serviceName)
         resumes.intValue++
         // Fetch from the foreground, where location access is allowed without background permission.
         refresher.refreshIfStale()
@@ -149,10 +153,10 @@ class SettingsActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    private fun openWallpaperPicker() {
+    private fun openWallpaperPicker(scenery: Scenery) {
         val direct = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).putExtra(
             WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,
-            ComponentName(this, PineValleyWallpaperService::class.java),
+            ComponentName(this, scenery.service),
         )
         try {
             startActivity(direct)
@@ -174,8 +178,8 @@ class SettingsActivity : ComponentActivity() {
     }
 
     private fun goHomeToPreview(): Boolean {
-        if (!wallpaperActive.value) {
-            Toast.makeText(this, "Set Pine Valley as your wallpaper first.", Toast.LENGTH_SHORT).show()
+        if (current.value == null) {
+            Toast.makeText(this, "Set a Weatherscape wallpaper first.", Toast.LENGTH_SHORT).show()
             return false
         }
         startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -202,14 +206,15 @@ private fun changed(vararg pairs: Pair<Any, Any>) = pairs.count { (now, default)
 
 @Composable
 private fun SettingsScreen(
-    active: Boolean,
+    current: Scenery?,
     resumes: Int,
     refreshing: Boolean,
-    onSetWallpaper: () -> Unit,
+    onSetWallpaper: (Scenery) -> Unit,
     onRefresh: () -> Unit,
     onPreview: (MomentKind) -> Unit,
     onLensPreview: (LensPreview) -> Unit,
 ) {
+    val active = current != null
     val context = LocalContext.current
     val prefs = remember { SettingsStore.prefs(context) }
     var s by remember { mutableStateOf(SettingsStore.read(context)) }
@@ -263,9 +268,9 @@ private fun SettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Column(Modifier.padding(horizontal = 4.dp)) {
-                    Text("Pine Valley", style = MaterialTheme.typography.headlineLarge, modifier = Modifier.semantics { heading() })
+                    Text("Weatherscape", style = MaterialTheme.typography.headlineLarge, modifier = Modifier.semantics { heading() })
                     Text(
-                        "A live wallpaper that follows the weather and the sun where you are.",
+                        "Live wallpapers that follow the weather and the sun where you are.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -273,9 +278,11 @@ private fun SettingsScreen(
 
                 val weatherReady = weather.report != null
                 if (!active || !weatherReady) {
-                    SetupCard(active, weather, s.placeName, hasWidget, widgets.isRequestPinAppWidgetSupported, onSetWallpaper, addWidget)
-                } else {
-                    WallpaperRow(hasWidget, widgets.isRequestPinAppWidgetSupported, onSetWallpaper, addWidget)
+                    SetupCard(active, weather, s.placeName, hasWidget, widgets.isRequestPinAppWidgetSupported, addWidget)
+                }
+                WallpaperChooser(current, onSetWallpaper)
+                if (active && weatherReady && !hasWidget && widgets.isRequestPinAppWidgetSupported) {
+                    TextButton(onClick = addWidget) { Text("Add the weather widget to your home screen") }
                 }
 
                 if (s.mode == Mode.TIMELAPSE || s.weather != WeatherChoice.AUTO || s.time != TimeChoice.AUTO) {
@@ -293,7 +300,7 @@ private fun SettingsScreen(
                     Segmented(listOf(true to "Phone location", false to "Choose a city"), s.useDeviceLocation, ::useDeviceLocation)
                     if (s.useDeviceLocation && !locationAllowed) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Hint("Location permission is off, so the valley shows ${s.placeName}.", Modifier.weight(1f))
+                            Hint("Location permission is off, so the weather is for ${s.placeName}.", Modifier.weight(1f))
                             TextButton(onClick = { permission.launch(Manifest.permission.ACCESS_COARSE_LOCATION) }) { Text("Allow") }
                         }
                     } else if (s.useDeviceLocation) {
@@ -306,7 +313,7 @@ private fun SettingsScreen(
 
                 LookGroup(s, ::update)
                 GlassGroup(s, active, ::update, onLensPreview)
-                MomentsGroup(s, active, ::update, onPreview)
+                MomentsGroup(s, current, ::update, onPreview)
                 PowerGroup(s, ::update)
                 OverrideGroup(s, ::update)
 
@@ -325,7 +332,6 @@ private fun SetupCard(
     placeName: String,
     hasWidget: Boolean,
     canPinWidget: Boolean,
-    onSetWallpaper: () -> Unit,
     onAddWidget: () -> Unit,
 ) {
     val steps = listOf(active, weather.report != null, hasWidget)
@@ -340,9 +346,7 @@ private fun SetupCard(
                 progress = { done / steps.size.toFloat() },
                 modifier = Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 6.dp),
             )
-            SetupStep(1, "Set Pine Valley as your wallpaper", "Opens a preview: tap Set wallpaper, then pick your screens.", active) {
-                Button(onClick = onSetWallpaper) { Text("Set as wallpaper") }
-            }
+            SetupStep(1, "Choose a wallpaper", "Tap one below, then Set wallpaper in the preview.", active)
             SetupStep(
                 2,
                 "Load the weather",
@@ -385,20 +389,53 @@ private fun SetupStep(number: Int, title: String, detail: String, done: Boolean,
     }
 }
 
+private fun thumbnail(scenery: Scenery) = when (scenery) {
+    Scenery.PINE_VALLEY -> R.drawable.wallpaper_thumbnail
+    Scenery.ROCK_JETTY -> R.drawable.jetty_thumbnail
+}
+
+private fun tagline(scenery: Scenery) = when (scenery) {
+    Scenery.PINE_VALLEY -> "Forest and valley fog, ${MomentKind.entries.size} wildlife moments"
+    Scenery.ROCK_JETTY -> "Filmed sea and rocks under a live sky"
+}
+
+/** One card per wallpaper: the one in use is marked, the others open the system preview to set them. */
 @Composable
-private fun WallpaperRow(hasWidget: Boolean, canPinWidget: Boolean, onSetWallpaper: () -> Unit, onAddWidget: () -> Unit) {
-    Column {
-        Row(Modifier.padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-            Text(
-                "Pine Valley is your wallpaper",
-                style = MaterialTheme.typography.labelLarge,
-                modifier = Modifier.weight(1f).padding(start = 8.dp),
-            )
-            TextButton(onClick = onSetWallpaper) { Text("Change") }
-        }
-        if (!hasWidget && canPinWidget) {
-            TextButton(onClick = onAddWidget) { Text("Add the weather widget to your home screen") }
+private fun WallpaperChooser(current: Scenery?, onSet: (Scenery) -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Scenery.entries.forEach { scenery ->
+            val chosen = scenery == current
+            Card(
+                Modifier
+                    .weight(1f)
+                    .clickable(enabled = !chosen, onClickLabel = "Set as wallpaper") { onSet(scenery) },
+                border = if (chosen) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
+            ) {
+                Image(
+                    painterResource(thumbnail(scenery)),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    alignment = Alignment.BottomCenter,
+                    modifier = Modifier.fillMaxWidth().height(120.dp),
+                )
+                Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 4.dp)) {
+                    Text(scenery.title, style = MaterialTheme.typography.titleSmall)
+                    Text(tagline(scenery), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (chosen) {
+                    Row(Modifier.padding(start = 12.dp, top = 10.dp, bottom = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                        Text(
+                            "Your wallpaper",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(start = 6.dp),
+                        )
+                    }
+                } else {
+                    TextButton(onClick = { onSet(scenery) }, modifier = Modifier.padding(start = 2.dp, bottom = 2.dp)) { Text("Set as wallpaper") }
+                }
+            }
         }
     }
 }
@@ -452,7 +489,7 @@ private fun NowCard(s: Settings, weather: WeatherStatus, refreshing: Boolean, on
             if (!refreshing) weather.error?.let {
                 Text("Last update failed: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             }
-            Label("The valley shows")
+            Label("The wallpaper shows")
             Segmented(listOf(0 to "Now", 1 to "In 1 hour", 3 to "In 3 hours"), s.forecastHours, onForecast)
             val report = weather.report
             Text(
@@ -565,7 +602,7 @@ private fun GlassGroup(s: Settings, active: Boolean, update: (Settings) -> Unit,
                 if (s.lensDrops) OutlinedButton(onClick = { onLensPreview(LensPreview.SHOWER) }, enabled = active) { Text("25-second shower") }
                 if (s.lensMist) OutlinedButton(onClick = { onLensPreview(LensPreview.MIST) }, enabled = active) { Text("Mist") }
             }
-            PreviewHint(active, "The valley keeps its real weather.")
+            PreviewHint(active, "The scene keeps its real weather.")
         }
     }
 }
@@ -581,10 +618,12 @@ private val MOMENT_GROUPS = listOf(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun MomentsGroup(s: Settings, active: Boolean, update: (Settings) -> Unit, onPreview: (MomentKind) -> Unit) {
+private fun MomentsGroup(s: Settings, current: Scenery?, update: (Settings) -> Unit, onPreview: (MomentKind) -> Unit) {
+    val pine = current == Scenery.PINE_VALLEY
     val d = DEFAULTS
     val count = changed(s.moments to d.moments, s.frequency to d.frequency, s.unlockReveal to d.unlockReveal, s.tapToWake to d.tapToWake)
     val summary = when {
+        current == Scenery.ROCK_JETTY -> "Pine Valley only"
         s.reducedMotion -> "Paused by Reduce motion"
         !s.moments -> "Off"
         else -> "${frequencyLabel(s.frequency)} · ${percent(s.frequency.visibleChance)} of visits home"
@@ -592,6 +631,7 @@ private fun MomentsGroup(s: Settings, active: Boolean, update: (Settings) -> Uni
     SettingsGroup("Wildlife and sky", summary, count, {
         update(s.copy(moments = d.moments, frequency = d.frequency, unlockReveal = d.unlockReveal, tapToWake = d.tapToWake))
     }) {
+        if (current == Scenery.ROCK_JETTY) Hint("Rock Jetty has no wildlife. These settings apply when Pine Valley is your wallpaper.")
         if (s.reducedMotion) Hint("Reduce motion is on (Battery and smoothness), so moments and touch effects are paused.")
         SwitchRow("Moments", "Wildlife, fog, the moon, aurora and more, only when the weather and light fit.", s.moments) {
             update(s.copy(moments = it))
@@ -617,10 +657,10 @@ private fun MomentsGroup(s: Settings, active: Boolean, update: (Settings) -> Uni
                 modifier = Modifier.padding(top = 4.dp),
             )
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                kinds.forEach { kind -> SuggestionChip(onClick = { onPreview(kind) }, label = { Text(kind.label) }, enabled = active) }
+                kinds.forEach { kind -> SuggestionChip(onClick = { onPreview(kind) }, label = { Text(kind.label) }, enabled = pine) }
             }
         }
-        PreviewHint(active, "Opens your home screen and plays it there.")
+        Hint(if (pine) "Opens your home screen and plays it there." else "Set Pine Valley as your wallpaper to play these.")
     }
 }
 
@@ -696,7 +736,7 @@ private fun OverrideGroup(s: Settings, update: (Settings) -> Unit) {
 
 // ------------------------------------------------------------------- derived text
 
-private const val CALM_FPS = PineValleyWallpaperService.CALM_FPS
+private const val CALM_FPS = SceneryWallpaperService.CALM_FPS
 
 private fun frameRateHint(s: Settings): String = when {
     s.reducedMotion -> "Reduce motion is on: the valley redraws twice a minute whatever you pick here."
@@ -904,7 +944,7 @@ private fun ValueSlider(
 
 @Composable
 private fun PreviewHint(active: Boolean, text: String) {
-    Hint(if (active) text else "Set Pine Valley as your wallpaper to try these.")
+    Hint(if (active) text else "Set a Weatherscape wallpaper to try these.")
 }
 
 @Composable

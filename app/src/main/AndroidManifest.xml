@@ -37,6 +37,19 @@
                 android:resource="@xml/pine_valley_wallpaper" />
         </service>
 
+        <service
+            android:name=".RockJettyWallpaperService"
+            android:exported="true"
+            android:label="@string/jetty_name"
+            android:permission="android.permission.BIND_WALLPAPER">
+            <intent-filter>
+                <action android:name="android.service.wallpaper.WallpaperService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.wallpaper"
+                android:resource="@xml/rock_jetty_wallpaper" />
+        </service>
+
         <receiver
             android:name=".ConditionsWidget"
             android:exported="false"
