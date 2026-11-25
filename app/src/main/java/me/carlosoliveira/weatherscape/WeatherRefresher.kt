@@ -53,8 +53,15 @@ object DeviceLocation {
     } catch (_: Exception) { null } ?: "Current location"
 }
 
-/** Fetches weather off the main thread and keeps the last report in preferences for cold starts. */
-class WeatherRefresher(private val context: Context, private val onReport: (WeatherReport) -> Unit) {
+/**
+ * Fetches weather off the main thread and keeps the last report in preferences for cold starts.
+ * [onBusy] hears true when a fetch starts and false when it ends, on the worker thread.
+ */
+class WeatherRefresher(
+    private val context: Context,
+    private val onBusy: (Boolean) -> Unit = {},
+    private val onReport: (WeatherReport) -> Unit,
+) {
     private val worker = Executors.newSingleThreadExecutor()
     private val running = AtomicBoolean(false)
     private val prefs = SettingsStore.prefs(context)
@@ -69,11 +76,13 @@ class WeatherRefresher(private val context: Context, private val onReport: (Weat
         val age = System.currentTimeMillis() - prefs.getLong(SettingsStore.WEATHER_FETCHED_AT, 0)
         val moved = prefs.getFloat("weather_latitude", 999f) != s.latitude.toFloat() ||
             prefs.getFloat("weather_longitude", 999f) != s.longitude.toFloat()
-        if (age > STALE_MILLIS || moved) refresh()
+        // A fetch time in the future means the clock moved back; that report's age is unknown.
+        if (age !in 0..STALE_MILLIS || moved) refresh()
     }
 
     fun refresh() {
         if (!running.compareAndSet(false, true)) return
+        onBusy(true)
         worker.execute {
             try {
                 var s = SettingsStore.read(context)
@@ -100,6 +109,7 @@ class WeatherRefresher(private val context: Context, private val onReport: (Weat
                 prefs.edit { putString(SettingsStore.WEATHER_ERROR, e.message ?: e.javaClass.simpleName) }
             } finally {
                 running.set(false)
+                onBusy(false)
             }
         }
     }

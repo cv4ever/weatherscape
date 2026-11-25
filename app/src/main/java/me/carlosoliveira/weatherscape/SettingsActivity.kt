@@ -40,6 +40,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -53,6 +54,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -108,6 +110,7 @@ import kotlin.math.roundToInt
 
 class SettingsActivity : ComponentActivity() {
     private val wallpaperActive = mutableStateOf(false)
+    private val refreshing = mutableStateOf(false)
     /** Bumped on every resume so the screen re-checks what may have changed elsewhere (widget, permission). */
     private val resumes = mutableIntStateOf(0)
     private lateinit var refresher: WeatherRefresher
@@ -116,12 +119,13 @@ class SettingsActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         // The wallpaper engine reloads the report through the shared preference change.
-        refresher = WeatherRefresher(applicationContext) {}
+        refresher = WeatherRefresher(applicationContext, onBusy = { refreshing.value = it }) {}
         setContent {
             WeatherscapeTheme {
                 SettingsScreen(
                     active = wallpaperActive.value,
                     resumes = resumes.intValue,
+                    refreshing = refreshing.value,
                     onSetWallpaper = ::openWallpaperPicker,
                     onRefresh = { refresher.refresh() },
                     onPreview = ::preview,
@@ -200,6 +204,7 @@ private fun changed(vararg pairs: Pair<Any, Any>) = pairs.count { (now, default)
 private fun SettingsScreen(
     active: Boolean,
     resumes: Int,
+    refreshing: Boolean,
     onSetWallpaper: () -> Unit,
     onRefresh: () -> Unit,
     onPreview: (MomentKind) -> Unit,
@@ -279,7 +284,7 @@ private fun SettingsScreen(
                     }
                 }
 
-                NowCard(s, weather, onRefresh) { update(s.copy(forecastHours = it)) }
+                NowCard(s, weather, refreshing, onRefresh) { update(s.copy(forecastHours = it)) }
 
                 SettingsGroup(
                     "Location",
@@ -422,7 +427,7 @@ private fun OverrideBanner(summary: String, onReal: () -> Unit) {
 }
 
 @Composable
-private fun NowCard(s: Settings, weather: WeatherStatus, onRefresh: () -> Unit, onForecast: (Int) -> Unit) {
+private fun NowCard(s: Settings, weather: WeatherStatus, refreshing: Boolean, onRefresh: () -> Unit, onForecast: (Int) -> Unit) {
     val context = LocalContext.current
     Card(
         Modifier.fillMaxWidth(),
@@ -434,9 +439,17 @@ private fun NowCard(s: Settings, weather: WeatherStatus, onRefresh: () -> Unit, 
                     Text(weather.headline, style = MaterialTheme.typography.titleLarge)
                     Text("${s.placeName} · ${weather.age}", style = MaterialTheme.typography.bodySmall)
                 }
-                TextButton(onClick = onRefresh) { Text("Refresh") }
+                TextButton(onClick = onRefresh, enabled = !refreshing) {
+                    if (refreshing) {
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Updating")
+                    } else {
+                        Text("Refresh")
+                    }
+                }
             }
-            weather.error?.let {
+            if (!refreshing) weather.error?.let {
                 Text("Last update failed: $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             }
             Label("The valley shows")
