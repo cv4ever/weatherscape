@@ -110,7 +110,7 @@ class SceneRenderer(private val context: Context, val director: SceneDirector, p
             // The fog bank tiles sideways as it drifts.
             fogTexture = texture("textures/fog_bank.webp", GL_MIRRORED_REPEAT)
         }
-        if (scenery.wildlife) for (atlas in Atlas.entries) atlases[atlas] = texture(atlas.path)
+        for (atlas in Atlas.entries) if (atlas.scenery == scenery) atlases[atlas] = texture(atlas.path)
         grain = grainTexture()
         frameCopy = IntArray(1).also { glGenTextures(1, it, 0) }[0]
         allocateFrameCopy()

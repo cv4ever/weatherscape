@@ -9,7 +9,10 @@ conditions and the next change in the forecast.
   moments (birds, deer, an owl, fog rolling in, aurora and more) when the conditions fit.
 - **Rock Jetty**: a stabilised, levelled, seamlessly looping phone video of the sea and rocks under
   the drawn sky. The water greys under cloud, hazes in fog and rain, darkens at night with a moonlit
-  path, and the rocks darken while wet. No wildlife.
+  path, and the rocks darken while wet. Its own moments: a herring gull sweeping past (also on a tap),
+  gulls wheeling, a cormorant, a yacht, a fishing boat, a cargo ship, a jet ski, a hot-air balloon and
+  an airliner with its contrail (lights only at night). Their sprites are image-model renders cut out
+  of a chroma-key background.
 
 Weather comes from [Open-Meteo](https://open-meteo.com) (CC BY 4.0), with no account or key.
 

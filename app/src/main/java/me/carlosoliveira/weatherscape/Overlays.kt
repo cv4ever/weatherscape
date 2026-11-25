@@ -130,11 +130,14 @@ data class Rgb(val r: Float, val g: Float, val b: Float) {
     }
 }
 
-/** One texture per animal; each gets its own batch so a frame needs one draw call per atlas. */
-enum class Atlas(val path: String) {
+/** One texture per animal or set of vehicles; each gets its own batch so a frame needs one draw call per atlas. */
+enum class Atlas(val path: String, val scenery: Scenery = Scenery.PINE_VALLEY) {
     BIRD("textures/bird_atlas.webp"), SQUIRREL("textures/squirrel_atlas.webp"), DEER("textures/deer_atlas.webp"),
     BUZZARD("textures/buzzard_atlas.webp"), GOOSE("textures/goose_atlas.webp"), OWL("textures/owl_atlas.webp"),
-    BAT("textures/bat_atlas.webp");
+    BAT("textures/bat_atlas.webp"),
+    GULL("textures/gull_atlas.webp", Scenery.ROCK_JETTY), CORMORANT("textures/cormorant_atlas.webp", Scenery.ROCK_JETTY),
+    /** One still per cell: sailing yacht, cargo ship, fishing boat, jet ski, hot-air balloon, airliner. */
+    VESSEL("textures/vessel_atlas.webp", Scenery.ROCK_JETTY);
 
     companion object {
         /** Array form so per-frame loops don't allocate iterators. */
@@ -187,6 +190,15 @@ class OverlayPainter(private val aspect: Float) {
             MomentKind.OWL -> owl(t, dir)
             MomentKind.BATS -> bats(t)
             MomentKind.CAR -> car(t)
+            MomentKind.GULL -> gull(t, dir, f)
+            MomentKind.GULLS -> gulls(t, f)
+            MomentKind.CORMORANT -> cormorant(t, dir, f)
+            MomentKind.SAILBOAT -> sailboat(t, dir, f)
+            MomentKind.FISHING_BOAT -> fishingBoat(t, dir, f)
+            MomentKind.CARGO_SHIP -> cargoShip(t, dir, f)
+            MomentKind.JET_SKI -> jetSki(t, dir, f)
+            MomentKind.BALLOON -> balloon(t, dir, f)
+            MomentKind.AIRLINER -> airliner(t, dir, f)
             else -> Unit // Sunbeam, rainbow, fog, moonrise and aurora are drawn by the landscape shader.
         }
         if (f.flushProgress >= 0f) flush(f)
@@ -541,6 +553,154 @@ class OverlayPainter(private val aspect: Float) {
         effects.glow(x, y, w * .009f, Rgb.hex(0xfffdf0), visible)
     }
 
+    // ------------------------------------------------------------ Rock Jetty
+    // Sprites face right; [dir] -1 mirrors them. Vessel cells keep the waterline at FOOT of the cell.
+
+    /** Lit like the scene: full colour by day, dark shapes at night with a little moonlight. */
+    private fun shade(f: Frame) = (.45f + .55f * daylight(f)) * nightLight(f, .22f)
+
+    /** Sea mist and rain swallow things on the horizon first. */
+    private fun distance(f: Frame, far: Float) = 1 - far * (.8f * smooth(.25f, 1.1f, f.air[1]) + .5f * smooth(.02f, .4f, f.air[3]))
+
+    /** Fades in and out over the first and last [edge] of a moment that starts and ends in view. */
+    private fun appear(t: Float, edge: Float) = smooth(0f, edge, t) * (1 - smooth(1 - edge, 1f, t))
+
+    private fun gull(t: Float, dir: Float, f: Frame) {
+        // A herring gull sweeps past close to the lens: a few lazy beats, a long glide, a bank as it leaves.
+        val age = t * 6f
+        val x = if (dir > 0) -.14f + 1.28f * t else 1.14f - 1.28f * t
+        val y = (.47f - .08f * t + .03f * sin(PI.toFloat() * t)) * aspect
+        val width = .17f + .04f * sin(PI.toFloat() * t)
+        val angle = dir * (-.04f + .09f * sin(t * TAU * .8f))
+        val batch = sprites.getValue(Atlas.GULL)
+        val b = shade(f)
+        if (wrap(age / 2.6f) > .42f) batch.sprite(2, x, y, width, .58f, angle, dir, .97f, brightness = b)
+        else batch.blended(age * 1.9f * 6, x, y, width, .58f, angle, dir, .97f, brightness = b)
+    }
+
+    private fun gulls(t: Float, f: Frame) {
+        // Three gulls ride the wind far out over the water, circling as the group drifts along the coast.
+        val batch = sprites.getValue(Atlas.GULL)
+        val alpha = .9f * appear(t, .12f) * distance(f, .6f)
+        val b = shade(f)
+        for (i in 0 until 3) {
+            val turn = t * TAU * 1.4f + i * 2.1f
+            val x = .28f + .38f * t + .05f * i + .085f * cos(turn)
+            val y = (.545f - .018f * i + .022f * sin(turn)) * aspect
+            val heading = if (sin(turn) < 0f) 1f else -1f
+            val beat = t * 16f * (1 + .1f * i)
+            if (wrap(beat / 3f + i * .3f) > .5f) batch.sprite(2, x, y, .03f, .58f, heading * .1f * cos(turn), heading, alpha, brightness = b)
+            else batch.blended(beat * 6, x, y, .03f, .58f, 0f, heading, alpha, brightness = b)
+        }
+    }
+
+    private fun cormorant(t: Float, dir: Float, f: Frame) {
+        // Low and fast over the water on quick, unbroken wingbeats.
+        val x = if (dir > 0) -.08f + 1.16f * t else 1.08f - 1.16f * t
+        val y = (HORIZON + .03f + .002f * sin(t * TAU * 2)) * aspect
+        sprites.getValue(Atlas.CORMORANT).blended(t * 7f * 4.2f * 6, x, y, .06f, .58f, 0f, dir, .95f * distance(f, .3f), brightness = shade(f))
+    }
+
+    /** [far] 0 is close, 1 on the horizon: distant hulls lose colour and contrast in the sea air. */
+    private fun vessel(cell: Int, x: Float, y: Float, width: Float, angle: Float, dir: Float, alpha: Float, far: Float, f: Frame) =
+        sprites.getValue(Atlas.VESSEL).sprite(
+            cell, x, y, width, FOOT, angle, dir, alpha, brightness = shade(f) * (1 - .12f * far), saturation = .9f - .45f * far,
+        )
+
+    private fun sailboat(t: Float, dir: Float, f: Frame) {
+        // A yacht close-hauled just short of the horizon, heeling and pitching in the swell.
+        val x = if (dir > 0) .22f + .2f * t else .78f - .2f * t
+        val y = (HORIZON + .007f + .0007f * sin(t * TAU * 9)) * aspect
+        val heel = -dir * (.05f + .02f * sin(t * TAU * 5))
+        vessel(0, x, y, .05f, heel, dir, appear(t, .1f) * distance(f, .9f), .8f, f)
+    }
+
+    private fun fishingBoat(t: Float, dir: Float, f: Frame) {
+        // Heading home: rolls on the swell, and after dark only its deck and mast lights carry.
+        val x = if (dir > 0) .2f + .3f * t else .8f - .3f * t
+        val y = (HORIZON + .013f + .001f * sin(t * TAU * 11)) * aspect
+        val alpha = appear(t, .1f) * distance(f, .8f)
+        vessel(2, x, y, .055f, .03f * sin(t * TAU * 7), dir, alpha, .6f, f)
+        val lights = (1 - daylight(f)) * alpha
+        effects.glow(x + dir * .008f, y - .02f, .006f, DECK_LIGHT, .9f * lights)
+        effects.glow(x + dir * .014f, y - .033f, .004f, MAST_LIGHT, lights)
+    }
+
+    private fun cargoShip(t: Float, dir: Float, f: Frame) {
+        // Hull down on the horizon, barely moving; at night a row of deck lights and its masthead lights.
+        val x = if (dir > 0) .3f + .16f * t else .7f - .16f * t
+        val y = (HORIZON + .0022f) * aspect
+        val alpha = appear(t, .12f) * distance(f, 1f)
+        vessel(1, x, y, .085f, 0f, dir, alpha, 1f, f)
+        val lights = (1 - daylight(f)) * alpha
+        effects.glow(x - dir * .026f, y - .021f, .004f, DECK_LIGHT, lights)
+        for (i in 0..4) effects.glow(x - dir * .014f + dir * i * .01f, y - .0085f, .002f, DECK_LIGHT, .6f * lights)
+        effects.glow(x + dir * .035f, y - .014f, .003f, MAST_LIGHT, lights)
+    }
+
+    private fun jetSki(t: Float, dir: Float, f: Frame) {
+        // Skips across the bay, bouncing on the chop, leaving a fading white wake.
+        val start = if (dir > 0) -.1f else 1.1f
+        val x = start + dir * 1.2f * t
+        val bounce = abs(sin(t * TAU * 7)) * .003f
+        val y = (HORIZON + .05f) * aspect
+        val alpha = distance(f, .4f)
+        val foam = (.55f + .45f * daylight(f)) * alpha
+        // The wake: a bright track straight behind, opening into a V that fades and spreads with age.
+        for (i in 1..14) {
+            val back = i * .018f
+            val bx = x - dir * back
+            if ((bx - start) * dir < 0) break
+            val fade = 1 - i / 15f
+            val spread = .002f + back * .09f
+            effects.stroke(bx, y - spread, bx - dir * .016f, y - spread * 1.25f, .0016f, WAKE, .55f * fade * foam, .4f * fade * foam)
+            effects.stroke(bx, y + spread * .5f, bx - dir * .016f, y + spread * .6f, .0016f, WAKE, .45f * fade * foam, .3f * fade * foam)
+            effects.stroke(bx, y, bx - dir * .016f, y, .004f * fade, WAKE, .5f * fade * foam, .35f * fade * foam)
+        }
+        vessel(3, x, y - bounce * aspect, .065f, -dir * .03f, dir, alpha, .2f, f)
+    }
+
+    private fun balloon(t: Float, dir: Float, f: Frame) {
+        // A morning balloon drifting on the breeze, slowly gaining height, its burner flaring now and then.
+        val x = if (dir > 0) .45f + .22f * t else .55f - .22f * t
+        val y = (.4f - .05f * t + .004f * sin(t * TAU * 2)) * aspect
+        val alpha = appear(t, .15f) * distance(f, .5f)
+        vessel(4, x, y, .085f, .02f * sin(t * TAU * 1.5f), 1f, alpha, .2f, f)
+        val burn = smooth(.0f, .02f, wrap(t * 6f)) * (1 - smooth(.04f, .08f, wrap(t * 6f)))
+        // The burner sits at the mouth of the envelope, just above the basket.
+        effects.glow(x, y - .008f, .006f, DECK_LIGHT, .8f * burn * alpha)
+    }
+
+    private fun airliner(t: Float, dir: Float, f: Frame) {
+        // High overhead: by day a white jet drawing a contrail, by night only its navigation lights.
+        val start = if (dir > 0) -.06f else 1.06f
+        val x = start + dir * 1.12f * t
+        val y = (.17f + .03f * t) * aspect
+        val day = smooth(.15f, .5f, daylight(f))
+        val clear = 1 - smooth(.3f, .7f, f.air[2])
+        val trail = (x - start) * dir
+        if (day > 0f && trail > .02f) {
+            // The trail starts thin and bright at the engines, then spreads and fades behind.
+            val tailX = x - dir * .016f
+            for (i in 0 until 6) {
+                val a = i / 6f
+                val b = (i + 1) / 6f
+                val ax = tailX - dir * trail * a
+                val bx = tailX - dir * trail * b
+                effects.stroke(ax, y + .0005f, bx, y + .0005f + .002f * b, .0016f + .005f * b, CONTRAIL,
+                    .55f * (1 - a) * day * clear, .55f * (1 - b) * day * clear)
+            }
+            vessel(5, x, y, .045f, 0f, dir, day * clear, .4f, f)
+        }
+        val night = 1 - day
+        if (night > 0f) {
+            val blink = if (wrap(t * 35f) < .06f) 1f else 0f
+            effects.glow(x - dir * .004f, y, .003f, NAV_RED, .9f * night)
+            effects.glow(x + dir * .004f, y, .003f, NAV_GREEN, .9f * night)
+            effects.glow(x, y, .006f, STROBE, blink * night)
+        }
+    }
+
     /** Piecewise-linear color stops, like a CSS gradient. */
     private class Stops(vararg val stops: Pair<Float, Pair<Rgb, Float>>) {
         fun at(s: Float): Pair<Rgb, Float> {
@@ -568,6 +728,17 @@ class OverlayPainter(private val aspect: Float) {
         private val HEADLIGHT_HALO = Rgb.hex(0xffe2a8)
         private val HEADLIGHT_SPILL = Rgb.hex(0xfff1c4)
         private val TAIL_LIGHT = Rgb.hex(0xff3b2a)
+        /** Rock Jetty's horizon in plate UV, as `horizonLine` in jetty.frag. */
+        private const val HORIZON = .64087f
+        /** Where vessel sprites sit their waterline in the atlas cell. */
+        private const val FOOT = .898f
+        private val WAKE = Rgb.hex(0xf2f6f8)
+        private val CONTRAIL = Rgb.hex(0xf7f9fc)
+        private val DECK_LIGHT = Rgb.hex(0xffdca0)
+        private val MAST_LIGHT = Rgb.hex(0xfff6e6)
+        private val NAV_RED = Rgb.hex(0xff4030)
+        private val NAV_GREEN = Rgb.hex(0x40ff80)
+        private val STROBE = Rgb.hex(0xffffff)
         private val FORMATION = arrayOf(
             0f to 0f, .036f to -.014f, .049f to .011f, .081f to -.026f, .102f to .028f,
             .124f to -.035f, .153f to .039f, .171f to -.039f,

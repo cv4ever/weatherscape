@@ -21,11 +21,17 @@ enum class Frequency(val visibleChance: Float, val cooldownSeconds: Int) {
     RARE(.18f, 25 * 60), OCCASIONAL(.38f, 8 * 60), OFTEN(.75f, 90)
 }
 enum class Quality(val renderScale: Float) { BATTERY(.5f), BALANCED(.7f), SHARP(1f) }
-enum class MomentKind(val label: String) {
+/** Something that happens now and then, staged on one [scenery]'s plate. */
+enum class MomentKind(val label: String, val scenery: Scenery = Scenery.PINE_VALLEY) {
     BIRD("Passing bird"), FLOCK("Distant flock"), SQUIRREL("Red squirrel"), FIREFLIES("Fireflies"),
     COMET("Shooting star"), SUNBEAM("Sunbeam after rain"), RAINBOW("Rainbow"),
     DEER("Roe deer"), BUZZARD("Buzzard"), GEESE("Geese"), FOG_ROLL("Fog rolling in"), MOONRISE("Moonrise"),
     OWL("Owl"), BATS("Bats"), AURORA("Aurora"), CAR("Distant car"),
+    GULL("Herring gull", Scenery.ROCK_JETTY), GULLS("Gulls wheeling", Scenery.ROCK_JETTY),
+    CORMORANT("Cormorant", Scenery.ROCK_JETTY), SAILBOAT("Sailing yacht", Scenery.ROCK_JETTY),
+    FISHING_BOAT("Fishing boat", Scenery.ROCK_JETTY), CARGO_SHIP("Cargo ship", Scenery.ROCK_JETTY),
+    JET_SKI("Jet ski", Scenery.ROCK_JETTY), BALLOON("Hot-air balloon", Scenery.ROCK_JETTY),
+    AIRLINER("Airliner", Scenery.ROCK_JETTY),
 }
 
 /** Lens drop tuning; each value multiplies the HTML preview's behaviour. */

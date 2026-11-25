@@ -395,8 +395,8 @@ private fun thumbnail(scenery: Scenery) = when (scenery) {
 }
 
 private fun tagline(scenery: Scenery) = when (scenery) {
-    Scenery.PINE_VALLEY -> "Forest and valley fog, ${MomentKind.entries.size} wildlife moments"
-    Scenery.ROCK_JETTY -> "Filmed sea and rocks under a live sky"
+    Scenery.PINE_VALLEY -> "Forest and valley fog, ${scenery.moments.size} wildlife moments"
+    Scenery.ROCK_JETTY -> "Filmed sea under a live sky, ${scenery.moments.size} moments"
 }
 
 /** One card per wallpaper: the one in use is marked, the others open the system preview to set them. */
@@ -607,49 +607,66 @@ private fun GlassGroup(s: Settings, active: Boolean, update: (Settings) -> Unit,
     }
 }
 
-private val MOMENT_GROUPS = listOf(
-    "Daytime" to listOf(
-        MomentKind.BIRD, MomentKind.FLOCK, MomentKind.SQUIRREL, MomentKind.SUNBEAM,
-        MomentKind.RAINBOW, MomentKind.BUZZARD, MomentKind.GEESE,
-    ),
-    "Dawn and dusk" to listOf(MomentKind.FOG_ROLL, MomentKind.DEER, MomentKind.FIREFLIES, MomentKind.BATS),
-    "Night" to listOf(MomentKind.COMET, MomentKind.MOONRISE, MomentKind.OWL, MomentKind.AURORA, MomentKind.CAR),
-)
+/** Each scenery's moments, grouped the way they turn up. */
+private fun momentGroups(scenery: Scenery) = when (scenery) {
+    Scenery.PINE_VALLEY -> listOf(
+        "Daytime" to listOf(
+            MomentKind.BIRD, MomentKind.FLOCK, MomentKind.SQUIRREL, MomentKind.SUNBEAM,
+            MomentKind.RAINBOW, MomentKind.BUZZARD, MomentKind.GEESE,
+        ),
+        "Dawn and dusk" to listOf(MomentKind.FOG_ROLL, MomentKind.DEER, MomentKind.FIREFLIES, MomentKind.BATS),
+        "Night" to listOf(MomentKind.COMET, MomentKind.MOONRISE, MomentKind.OWL, MomentKind.AURORA, MomentKind.CAR),
+    )
+    Scenery.ROCK_JETTY -> listOf(
+        "Birds" to listOf(MomentKind.GULL, MomentKind.GULLS, MomentKind.CORMORANT),
+        "On the water" to listOf(MomentKind.SAILBOAT, MomentKind.FISHING_BOAT, MomentKind.CARGO_SHIP, MomentKind.JET_SKI),
+        "In the sky" to listOf(MomentKind.BALLOON, MomentKind.AIRLINER),
+    )
+}
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun MomentsGroup(s: Settings, current: Scenery?, update: (Settings) -> Unit, onPreview: (MomentKind) -> Unit) {
-    val pine = current == Scenery.PINE_VALLEY
+    // With no Weatherscape wallpaper set, show Pine Valley's as an example.
+    val scenery = current ?: Scenery.PINE_VALLEY
+    val jetty = scenery == Scenery.ROCK_JETTY
     val d = DEFAULTS
     val count = changed(s.moments to d.moments, s.frequency to d.frequency, s.unlockReveal to d.unlockReveal, s.tapToWake to d.tapToWake)
     val summary = when {
-        current == Scenery.ROCK_JETTY -> "Pine Valley only"
         s.reducedMotion -> "Paused by Reduce motion"
         !s.moments -> "Off"
         else -> "${frequencyLabel(s.frequency)} · ${percent(s.frequency.visibleChance)} of visits home"
     }
-    SettingsGroup("Wildlife and sky", summary, count, {
+    SettingsGroup("Moments", summary, count, {
         update(s.copy(moments = d.moments, frequency = d.frequency, unlockReveal = d.unlockReveal, tapToWake = d.tapToWake))
     }) {
-        if (current == Scenery.ROCK_JETTY) Hint("Rock Jetty has no wildlife. These settings apply when Pine Valley is your wallpaper.")
         if (s.reducedMotion) Hint("Reduce motion is on (Battery and smoothness), so moments and touch effects are paused.")
-        SwitchRow("Moments", "Wildlife, fog, the moon, aurora and more, only when the weather and light fit.", s.moments) {
-            update(s.copy(moments = it))
-        }
+        SwitchRow(
+            "Moments",
+            if (jetty) "Gulls, boats, a balloon or a plane, only when the weather and light fit."
+            else "Wildlife, fog, the moon, aurora and more, only when the weather and light fit.",
+            s.moments,
+        ) { update(s.copy(moments = it)) }
         if (s.moments) {
             Label("How often")
             Segmented(Frequency.entries.map { it to frequencyLabel(it) }, s.frequency) { update(s.copy(frequency = it)) }
             Hint("Plays on ${percent(s.frequency.visibleChance)} of your visits to the home screen, at most one every ${duration(s.frequency.cooldownSeconds)}.")
         }
         Label("When you touch the phone")
-        SwitchRow("Wake on unlock", "The mist thins as you unlock, and sometimes a bird leaves a treetop.", s.unlockReveal) {
-            update(s.copy(unlockReveal = it))
-        }
-        SwitchRow("Tap to wake the valley", "Tapping empty home-screen space sends birds up from the nearest trees.", s.tapToWake) {
-            update(s.copy(tapToWake = it))
-        }
-        Label("Play one now (${MomentKind.entries.size} moments)")
-        MOMENT_GROUPS.forEach { (title, kinds) ->
+        SwitchRow(
+            "Wake on unlock",
+            if (jetty) "The sea haze thins for a moment as you unlock."
+            else "The mist thins as you unlock, and sometimes a bird leaves a treetop.",
+            s.unlockReveal,
+        ) { update(s.copy(unlockReveal = it)) }
+        SwitchRow(
+            "Tap to wake",
+            if (jetty) "Tapping empty home-screen space sends a gull sweeping past."
+            else "Tapping empty home-screen space sends birds up from the nearest trees.",
+            s.tapToWake,
+        ) { update(s.copy(tapToWake = it)) }
+        Label("Play one now (${scenery.moments.size} in ${scenery.title})")
+        momentGroups(scenery).forEach { (title, kinds) ->
             Text(
                 title,
                 style = MaterialTheme.typography.labelMedium,
@@ -657,10 +674,10 @@ private fun MomentsGroup(s: Settings, current: Scenery?, update: (Settings) -> U
                 modifier = Modifier.padding(top = 4.dp),
             )
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                kinds.forEach { kind -> SuggestionChip(onClick = { onPreview(kind) }, label = { Text(kind.label) }, enabled = pine) }
+                kinds.forEach { kind -> SuggestionChip(onClick = { onPreview(kind) }, label = { Text(kind.label) }, enabled = current != null) }
             }
         }
-        Hint(if (pine) "Opens your home screen and plays it there." else "Set Pine Valley as your wallpaper to play these.")
+        Hint(if (current != null) "Opens your home screen and plays it there." else "Set a Weatherscape wallpaper to play these.")
     }
 }
 

@@ -34,7 +34,7 @@ abstract class SceneryWallpaperService(private val scenery: Scenery) : Wallpaper
 
     inner class SceneEngine : Engine(), SharedPreferences.OnSharedPreferenceChangeListener, Choreographer.FrameCallback {
         private val prefs = SettingsStore.prefs(this@SceneryWallpaperService)
-        private val director = SceneDirector(scenery.wildlife)
+        private val director = SceneDirector(scenery)
         private val renderer = SceneRenderer(applicationContext, director, scenery)
         private val refresher = WeatherRefresher(applicationContext) { director.weather = it }
         private var view: SceneView? = null

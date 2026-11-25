@@ -59,10 +59,11 @@ class Frame {
 
 /**
  * Turns settings, weather and the clock into a [Frame]. Runs on the GL thread only;
- * [weather] and [settings] are swapped in from other threads as whole objects. [wildlife] places
- * moments and flushed birds on Pine Valley's plate; other sceneries go without.
+ * [weather] and [settings] are swapped in from other threads as whole objects. Moments come from
+ * [scenery]'s own set; birds flushed from treetops only exist in Pine Valley.
  */
-class SceneDirector(private val wildlife: Boolean = true) {
+class SceneDirector(private val scenery: Scenery = Scenery.PINE_VALLEY) {
+    private val pine = scenery == Scenery.PINE_VALLEY
     @Volatile var settings = Settings()
     @Volatile var weather: WeatherReport? = null
 
@@ -110,20 +111,33 @@ class SceneDirector(private val wildlife: Boolean = true) {
         if (!s.unlockReveal || s.reducedMotion) return
         unlockAt = time
         val (wind, _, _, rain) = blended
-        if (wildlife && lastAltitude > 2 && rain < .05f && blended[4] < .1f && wind < 2.4f && Random.nextFloat() < .5f) {
+        if (pine && lastAltitude > 2 && rain < .05f && blended[4] < .1f && wind < 2.4f && Random.nextFloat() < .5f) {
             val tip = TREE_TIPS.random()
             startFlush(time, tip.first, tip.second, 1)
         }
     }
 
-    /** A tap on the empty home screen at plate coordinates [x], [y]: birds burst from the nearest treetop. */
+    /**
+     * A tap on the empty home screen at plate coordinates [x], [y]: in Pine Valley birds burst from the
+     * nearest treetop; at the jetty a gull sweeps past, if nothing else is passing.
+     */
     fun onTap(time: Double, x: Float, y: Float) {
         val s = settings
-        if (!wildlife || !s.tapToWake || s.reducedMotion || time - flushStart < 4.5) return
+        if (!s.tapToWake || s.reducedMotion || time - flushStart < 4.5 || time - lastTap < 4.5) return
         if (lastAltitude < -4 || blended[3] > .3f) return
+        if (!pine) {
+            if (momentKind != null || s.mode != Mode.LIVE) return
+            lastTap = time
+            momentKind = MomentKind.GULL
+            momentStart = time + .3
+            momentFlip = x < .5f
+            return
+        }
         val tip = TREE_TIPS.minBy { abs(it.first - x) + .3f * abs(it.second - y) }
         startFlush(time, tip.first, tip.second, Random.nextInt(4, 7))
     }
+
+    private var lastTap = 0.0
 
     private fun startFlush(time: Double, x: Float, y: Float, count: Int) {
         flushStart = time
@@ -134,7 +148,7 @@ class SceneDirector(private val wildlife: Boolean = true) {
     }
 
     fun preview(kind: MomentKind, time: Double) {
-        if (!wildlife) return
+        if (kind.scenery != scenery) return
         previewKind = kind
         previewStart = time
         hasBlend = false
@@ -279,7 +293,7 @@ class SceneDirector(private val wildlife: Boolean = true) {
 
     private fun rollMoment(time: Double, chance: Float) {
         val s = settings
-        if (!wildlife || !s.moments || s.reducedMotion || momentKind != null) return
+        if (!s.moments || s.reducedMotion || momentKind != null) return
         if (time - momentEnd < s.frequency.cooldownSeconds) return
         if (Random.nextFloat() > chance) return
         val month = Instant.now().atZone(ZoneId.systemDefault()).monthValue
@@ -288,7 +302,7 @@ class SceneDirector(private val wildlife: Boolean = true) {
         val since = lastSinceRain
         val calm = rain < .02f && snow < .3f
         val morning = lastLightSide < 0
-        val eligible = buildList {
+        val eligible = if (pine) buildList {
             if (alt > 2 && calm && wind < 2.4f) add(MomentKind.BIRD to 3)
             if (alt > -4 && calm && wind < 2.2f) add(MomentKind.FLOCK to 2)
             if (alt > 4 && calm && wind < 1.6f) add(MomentKind.SQUIRREL to 2)
@@ -307,6 +321,17 @@ class SceneDirector(private val wildlife: Boolean = true) {
             // Auroras never reach Portugal; a rare one is a deliberate liberty.
             if (alt < -14 && cover < .2f && rain < .01f && Random.nextFloat() < .2f) add(MomentKind.AURORA to 2)
             if (alt < -6 && rain < .4f) add(MomentKind.CAR to 3)
+        } else buildList {
+            if (alt > -2 && rain < .3f && wind < 3f) add(MomentKind.GULL to 5)
+            if (alt > -4 && rain < .2f) add(MomentKind.GULLS to 4)
+            if (alt > 0 && calm && wind < 2f) add(MomentKind.CORMORANT to 3)
+            // A yacht needs some wind, and the horizon has to be visible.
+            if (alt > -2 && rain < .1f && mist < .7f && wind in .5f..2.6f) add(MomentKind.SAILBOAT to 4)
+            if (rain < .3f && mist < .8f) add(MomentKind.FISHING_BOAT to 3)
+            if (rain < .4f && mist < .7f) add(MomentKind.CARGO_SHIP to 3)
+            if (month in 5..9 && alt > 15 && calm && wind < 1.6f && cover < .5f) add(MomentKind.JET_SKI to 3)
+            if (morning && alt in 2.0..30.0 && wind < 1.2f && calm && cover < .5f) add(MomentKind.BALLOON to 3)
+            if (cover < .6f && rain < .05f) add(MomentKind.AIRLINER to 3)
         }
         if (eligible.isEmpty()) return
         var pick = Random.nextInt(eligible.sumOf { it.second })
@@ -351,13 +376,26 @@ class SceneDirector(private val wildlife: Boolean = true) {
     private var scheduleLoop = -1L
     private var schedule: List<Triple<MomentKind, Double, Boolean>> = emptyList()
 
-    /** Same recipe as the HTML preview: a daytime visitor, a clearing moment, a dusk visitor, a night moment. */
+    /**
+     * Same recipe as the HTML preview: a daytime visitor, a clearing moment, a dusk visitor, a night
+     * moment. The jetty has its own: a bird by day, a boat as the storm clears, a ship or plane at night.
+     */
     private fun timelapseSchedule(loop: Long): List<Triple<MomentKind, Double, Boolean>> {
         if (loop == scheduleLoop) return schedule
         scheduleLoop = loop
         val r = Random(loop * 7919 + 17)
         fun at(offset: Double) = (offset + 260) * TIMELAPSE_SECONDS / 415
         val list = mutableListOf<Triple<MomentKind, Double, Boolean>>()
+        if (!pine) {
+            val early = listOf(MomentKind.GULL, MomentKind.GULLS, MomentKind.CORMORANT, MomentKind.JET_SKI).random(r)
+            list += Triple(early, 1 + r.nextDouble(), r.nextBoolean())
+            val boat = listOf(MomentKind.SAILBOAT, MomentKind.FISHING_BOAT).random(r)
+            list += Triple(boat, at(-42.0) + r.nextDouble(), r.nextBoolean())
+            val late = listOf(MomentKind.CARGO_SHIP, MomentKind.AIRLINER).random(r)
+            list += Triple(late, TIMELAPSE_SECONDS - TIMELAPSE_LENGTH.getValue(late) - .6, r.nextBoolean())
+            schedule = list
+            return list
+        }
         val early = listOf(MomentKind.BIRD, MomentKind.FLOCK, MomentKind.SQUIRREL, MomentKind.BUZZARD, MomentKind.GEESE).random(r)
         list += Triple(early, 1 + r.nextDouble(), r.nextBoolean())
         val clearing = r.nextDouble()
@@ -402,6 +440,9 @@ class SceneDirector(private val wildlife: Boolean = true) {
             MomentKind.COMET -> rain <= .012f && f.light[0] > .55f && cover < .16f
             MomentKind.FIREFLIES -> rain <= .012f && f.light[0] > .23f && wind < 1.1f
             MomentKind.SUNBEAM -> rain <= .012f && f.light[0] < .10f && mist > .6f && cover > .045f
+            MomentKind.SAILBOAT, MomentKind.FISHING_BOAT -> rain < .1f && mist < 1.1f
+            MomentKind.CARGO_SHIP -> rain < .3f
+            MomentKind.AIRLINER -> rain < .05f && cover < .6f
             else -> rain <= .012f && wind < 2.38f && f.light[0] < .32f
         }
     }
@@ -411,7 +452,11 @@ class SceneDirector(private val wildlife: Boolean = true) {
     /** Holds a fixed point of the storm sequence so a preview always has suitable light and weather. */
     private fun staged(kind: MomentKind, out: Frame) {
         val (day, _) = solarFor(settings, Instant.now())
-        val minute = if (kind == MomentKind.FOG_ROLL) day.sunrise + 25 else day.sunset + STAGE.getValue(kind)
+        val minute = when (kind) {
+            MomentKind.FOG_ROLL -> day.sunrise + 25
+            MomentKind.BALLOON -> day.sunrise + 70
+            else -> day.sunset + STAGE.getValue(kind)
+        }
         ambient(day, minute, out)
         fronts((minute - day.sunset).toFloat(), out.air)
         if (kind == MomentKind.FOG_ROLL) out.air[1] += .75f * (1 - smooth(20f, 110f, abs(minute - day.sunrise).toFloat()))
@@ -570,22 +615,31 @@ class SceneDirector(private val wildlife: Boolean = true) {
             for (i in 0..3) air[i] = mix(a[i + 1], b[i + 1], t)
         }
 
-        /** Where in the storm sequence each preview is staged, in minutes from sunset (fog rolls in at dawn). */
+        /**
+         * Where in the storm sequence each preview is staged, in minutes from sunset (fog rolls in and
+         * the balloon rises at dawn).
+         */
         private val STAGE = mapOf(
             MomentKind.BIRD to -243.0, MomentKind.FLOCK to -36.0, MomentKind.SQUIRREL to -243.0,
             MomentKind.FIREFLIES to 82.0, MomentKind.COMET to 155.0, MomentKind.SUNBEAM to -34.0,
             MomentKind.RAINBOW to -52.0, MomentKind.DEER to 4.0, MomentKind.BUZZARD to -243.0,
             MomentKind.GEESE to -243.0, MomentKind.FOG_ROLL to 0.0, MomentKind.MOONRISE to 155.0,
             MomentKind.OWL to 155.0, MomentKind.BATS to 40.0, MomentKind.AURORA to 155.0, MomentKind.CAR to 155.0,
+            MomentKind.GULL to -243.0, MomentKind.GULLS to -243.0, MomentKind.CORMORANT to -243.0,
+            MomentKind.SAILBOAT to -209.0, MomentKind.FISHING_BOAT to -12.0, MomentKind.CARGO_SHIP to 31.0,
+            MomentKind.JET_SKI to -243.0, MomentKind.AIRLINER to -243.0,
         )
 
-        /** Real-time lengths: slow light events linger, animals pass at their own pace. */
+        /** Real-time lengths: slow light events linger, animals pass at their own pace, ships take their time. */
         private val LIVE_LENGTH = mapOf(
             MomentKind.BIRD to 4.6, MomentKind.FLOCK to 7.5, MomentKind.SQUIRREL to 5.8,
             MomentKind.FIREFLIES to 12.0, MomentKind.COMET to 4.4, MomentKind.SUNBEAM to 16.0,
             MomentKind.RAINBOW to 20.0, MomentKind.DEER to 16.0, MomentKind.BUZZARD to 22.0,
             MomentKind.GEESE to 14.0, MomentKind.FOG_ROLL to 30.0, MomentKind.MOONRISE to 14.0,
             MomentKind.OWL to 6.5, MomentKind.BATS to 10.0, MomentKind.AURORA to 40.0, MomentKind.CAR to 14.0,
+            MomentKind.GULL to 6.0, MomentKind.GULLS to 16.0, MomentKind.CORMORANT to 7.0,
+            MomentKind.SAILBOAT to 60.0, MomentKind.FISHING_BOAT to 45.0, MomentKind.CARGO_SHIP to 70.0,
+            MomentKind.JET_SKI to 11.0, MomentKind.BALLOON to 60.0, MomentKind.AIRLINER to 35.0,
         )
 
         /** Lengths inside the compressed 48-second timelapse, matching the HTML preview. */
@@ -595,6 +649,9 @@ class SceneDirector(private val wildlife: Boolean = true) {
             MomentKind.RAINBOW to 2.45, MomentKind.DEER to 11.0, MomentKind.BUZZARD to 15.0,
             MomentKind.GEESE to 9.0, MomentKind.FOG_ROLL to 14.0, MomentKind.MOONRISE to 12.0,
             MomentKind.OWL to 5.5, MomentKind.BATS to 7.0, MomentKind.AURORA to 14.0, MomentKind.CAR to 11.0,
+            MomentKind.GULL to 4.6, MomentKind.GULLS to 8.0, MomentKind.CORMORANT to 5.0,
+            MomentKind.SAILBOAT to 12.0, MomentKind.FISHING_BOAT to 12.0, MomentKind.CARGO_SHIP to 14.0,
+            MomentKind.JET_SKI to 6.0, MomentKind.BALLOON to 12.0, MomentKind.AIRLINER to 12.0,
         )
 
         /** Wraps a minute difference into -720..720 so day boundaries don't flip the sun's side. */
