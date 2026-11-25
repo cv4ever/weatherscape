@@ -569,7 +569,8 @@ class OverlayPainter(private val aspect: Float) {
         // A herring gull sweeps past close to the lens: a few lazy beats, a long glide, a bank as it leaves.
         val age = t * 6f
         val x = if (dir > 0) -.14f + 1.28f * t else 1.14f - 1.28f * t
-        val y = (.47f - .08f * t + .03f * sin(PI.toFloat() * t)) * aspect
+        // Through the open sky just above the sea, below where home-screen widgets usually sit.
+        val y = (.56f - .08f * t + .03f * sin(PI.toFloat() * t)) * aspect
         val width = .17f + .04f * sin(PI.toFloat() * t)
         val angle = dir * (-.04f + .09f * sin(t * TAU * .8f))
         val batch = sprites.getValue(Atlas.GULL)
@@ -653,9 +654,9 @@ class OverlayPainter(private val aspect: Float) {
             if ((bx - start) * dir < 0) break
             val fade = 1 - i / 15f
             val spread = .002f + back * .09f
-            effects.stroke(bx, y - spread, bx - dir * .016f, y - spread * 1.25f, .0016f, WAKE, .55f * fade * foam, .4f * fade * foam)
-            effects.stroke(bx, y + spread * .5f, bx - dir * .016f, y + spread * .6f, .0016f, WAKE, .45f * fade * foam, .3f * fade * foam)
-            effects.stroke(bx, y, bx - dir * .016f, y, .004f * fade, WAKE, .5f * fade * foam, .35f * fade * foam)
+            effects.stroke(bx, y - spread, bx - dir * .016f, y - spread * 1.25f, .0024f, WAKE, .75f * fade * foam, .6f * fade * foam)
+            effects.stroke(bx, y + spread * .5f, bx - dir * .016f, y + spread * .6f, .0024f, WAKE, .6f * fade * foam, .45f * fade * foam)
+            effects.stroke(bx, y, bx - dir * .016f, y, .007f * fade, WAKE, .75f * fade * foam, .55f * fade * foam)
         }
         vessel(3, x, y - bounce * aspect, .065f, -dir * .03f, dir, alpha, .2f, f)
     }
@@ -675,7 +676,8 @@ class OverlayPainter(private val aspect: Float) {
         // High overhead: by day a white jet drawing a contrail, by night only its navigation lights.
         val start = if (dir > 0) -.06f else 1.06f
         val x = start + dir * 1.12f * t
-        val y = (.17f + .03f * t) * aspect
+        // Mid-sky rather than at the top, where clocks and widgets usually sit.
+        val y = (.29f + .025f * t) * aspect
         val day = smooth(.15f, .5f, daylight(f))
         val clear = 1 - smooth(.3f, .7f, f.air[2])
         val trail = (x - start) * dir
