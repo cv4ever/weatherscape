@@ -41,8 +41,11 @@ jobs:
           echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
           version="${TAG#v}"
           apksigner=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner
+          # Keep the zip entries byte for byte (no realignment, no v1 JAR files; minSdk 30 needs
+          # neither), so F-Droid can copy this signature onto its own unsigned build.
           "$apksigner" sign --ks "$RUNNER_TEMP/release.jks" --ks-key-alias weatherscape \
             --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEYSTORE_PASSWORD \
+            --v1-signing-enabled false --alignment-preserved true \
             --out "weatherscape-$version.apk" app/build/outputs/apk/release/app-release-unsigned.apk
           "$apksigner" verify --print-certs "weatherscape-$version.apk"
           rm "$RUNNER_TEMP/release.jks"
