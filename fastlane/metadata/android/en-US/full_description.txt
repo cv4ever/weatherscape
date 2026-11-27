@@ -1,0 +1,17 @@
+<p>Weatherscape turns your home screen into a living landscape that shows the weather where you are. Rain falls when it rains outside, fog rolls in on foggy mornings, the sun rises and sets on time, and at night the real moon and the Milky Way come out.</p>
+
+<p>Two sceneries:</p>
+<ul>
+<li><b>Pine Valley</b>: a forest valley with drifting fog, wind in the trees, snow cover in winter and rare moments when the conditions fit: birds, deer, an owl, a squirrel, fog rolling in, an aurora or a shooting star.</li>
+<li><b>Rock Jetty</b>: the sea from a rock jetty. The water greys under cloud, hazes in rain and fog and shows a moonlit path at night. Gulls, a cormorant, boats, a hot-air balloon and an airliner pass by now and then.</li>
+</ul>
+
+<p>Both share one sky drawn live on the GPU: clouds, rain, snow, lightning, sunsets, the moon in its current phase, and stars. Raindrops and condensation gather on the camera glass when it rains.</p>
+
+<p>A home-screen widget shows the conditions and the next change in the forecast.</p>
+
+<p>Easy on the battery: the wallpaper slows to 15 frames per second when the scene is calm, redraws twice a minute in Battery Saver or with reduced motion, and draws nothing while it is hidden.</p>
+
+<p>Private: no account, no ads, no tracking. Weather comes from Open-Meteo (CC BY 4.0) using your approximate location, or a city you choose.</p>
+
+<p>Made by Carlos Oliveira: https://carlosoliveira.me/</p>

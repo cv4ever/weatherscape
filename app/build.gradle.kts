@@ -38,6 +38,12 @@ android {
         // Textures are already compressed WebP; storing them avoids a second inflate at load.
         noCompress += "webp"
     }
+
+    dependenciesInfo {
+        // Google-encrypted dependency metadata: F-Droid rejects APKs that carry it.
+        includeInApk = false
+        includeInBundle = false
+    }
 }
 
 dependencies {

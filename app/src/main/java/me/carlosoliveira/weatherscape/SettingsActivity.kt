@@ -94,6 +94,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -318,6 +319,12 @@ private fun SettingsScreen(
                 OverrideGroup(s, ::update)
 
                 Hint("Weather data by Open-Meteo.com (CC BY 4.0).", Modifier.padding(horizontal = 4.dp, vertical = 8.dp))
+                val uris = LocalUriHandler.current
+                Hint("Free software under the GPL-3.0.", Modifier.padding(horizontal = 4.dp))
+                Row {
+                    TextButton(onClick = { uris.openUri("https://github.com/cv4ever/weatherscape") }) { Text("Source code") }
+                    TextButton(onClick = { uris.openUri("https://carlosoliveira.me/") }) { Text("By Carlos Oliveira") }
+                }
             }
         }
     }

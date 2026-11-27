@@ -14,7 +14,15 @@ conditions and the next change in the forecast.
   an airliner with its contrail (lights only at night). Their sprites are image-model renders cut out
   of a chroma-key background.
 
-Weather comes from [Open-Meteo](https://open-meteo.com) (CC BY 4.0), with no account or key.
+Weather comes from [Open-Meteo](https://open-meteo.com) (CC BY 4.0), with no account or key. No ads,
+no analytics, no tracking.
+
+<p>
+  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/1_pine_valley.png" width="24%" alt="Pine Valley in rain, with drops on the glass and a rainbow">
+  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/2_rock_jetty.png" width="24%" alt="Rock Jetty with a gull passing">
+  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/5_rock_jetty_night.png" width="24%" alt="Rock Jetty at night under the Milky Way">
+  <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/4_settings_groups.png" width="24%" alt="Settings: try other weather and times of day">
+</p>
 
 ## Build and install
 
@@ -58,3 +66,15 @@ frame rate while visible and pauses its video in the still modes.
 - Adreno GPUs break arithmetic shader hashes at large coordinates, so value noise reads a
   256×256 random texture instead.
 - The HTML prototypes the effects were designed in are not part of this repository.
+- Store listing text, icon and screenshots for F-Droid live in `fastlane/metadata/android`.
+
+## License
+
+Code: [GPL-3.0-or-later](LICENSE). Images, video and sprite atlases in `app/src/main/assets` and
+`app/src/main/res`: [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). The Rock Jetty
+video is Carlos's own footage; the Pine Valley plate, the sky textures and the animal and vessel
+sprites are image-model renders.
+
+## Author
+
+Made by [Carlos Oliveira](https://carlosoliveira.me/).
