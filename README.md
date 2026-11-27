@@ -24,6 +24,12 @@ no analytics, no tracking.
   <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/4_settings_groups.png" width="24%" alt="Settings: try other weather and times of day">
 </p>
 
+## Install
+
+Download `weatherscape-<version>.apk` from [Releases](https://github.com/cv4ever/weatherscape/releases)
+(Android 11 or later). Signing certificate SHA-256:
+`195bcd784da458829db1cb850cd94d69c896d0520b3d0bf8dbc2dcc736c4168f`.
+
 ## Build and install
 
 Needs JDK 17 and the Android SDK (path in `local.properties`, which is not committed).
@@ -34,6 +40,18 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
 Then open Weatherscape and tap **Set as wallpaper** under the scenery you want.
+
+## Release
+
+1. Raise `versionCode` and `versionName` in `app/build.gradle.kts` and add
+   `fastlane/metadata/android/en-US/changelogs/<versionCode>.txt`.
+2. Commit, then push a tag `v<versionName>`.
+
+The Release workflow builds the APK on Linux, signs it after the build with the Weatherscape key
+(GitHub secrets `WEATHERSCAPE_KEYSTORE_B64` and `WEATHERSCAPE_KEYSTORE_PASSWORD`, backed up in
+Bitwarden) and attaches it to the release. F-Droid builds the same tag and publishes it with this
+signature when its unsigned build matches byte for byte (reproducible builds). Never let Gradle sign
+the release: the APK must stay identical to an unsigned build.
 
 ## Layout
 

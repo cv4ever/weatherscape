@@ -1,0 +1,57 @@
+# Builds the release APK on Linux, signs it with the Weatherscape key and attaches it to the GitHub
+# release. F-Droid rebuilds the same tag unsigned and ships this signature if the APKs match
+# (reproducible builds), so the APK is signed after the build, never by Gradle.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build, e.g. v0.1.0
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Build unsigned release APK
+        run: ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleRelease
+
+      - name: Sign
+        env:
+          KEYSTORE_B64: ${{ secrets.WEATHERSCAPE_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.WEATHERSCAPE_KEYSTORE_PASSWORD }}
+        run: |
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          version="${TAG#v}"
+          apksigner=$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner
+          "$apksigner" sign --ks "$RUNNER_TEMP/release.jks" --ks-key-alias weatherscape \
+            --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEYSTORE_PASSWORD \
+            --out "weatherscape-$version.apk" app/build/outputs/apk/release/app-release-unsigned.apk
+          "$apksigner" verify --print-certs "weatherscape-$version.apk"
+          rm "$RUNNER_TEMP/release.jks"
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${TAG#v}"
+          notes=fastlane/metadata/android/en-US/changelogs/$(sed -n 's/.*versionCode = \([0-9]*\).*/\1/p' app/build.gradle.kts).txt
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "Weatherscape $version" --notes-file "$notes"
+          gh release upload "$TAG" "weatherscape-$version.apk" --clobber
