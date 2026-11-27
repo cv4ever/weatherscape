@@ -32,7 +32,7 @@ Download `weatherscape-<version>.apk` from [Releases](https://github.com/cv4ever
 
 ## Build and install
 
-Needs JDK 17 and the Android SDK (path in `local.properties`, which is not committed).
+Needs JDK 17 or later and the Android SDK (path in `local.properties`, which is not committed).
 
 ```sh
 ./gradlew :app:testDebugUnitTest :app:assembleDebug

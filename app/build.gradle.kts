@@ -26,8 +26,11 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    // No jvmToolchain: F-Droid's build server has only a newer JDK. Bytecode targets 17 either way.
     kotlin {
-        jvmToolchain(17)
+        compilerOptions {
+            jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+        }
     }
 
     buildFeatures {
